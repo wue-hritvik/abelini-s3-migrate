@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -44,7 +45,8 @@ public class S3Service {
         this.executor = executor;
     }
 
-    public String exportS3ImagesToCSV(String name, boolean onlySupportedFile) {
+    @Async
+    public void exportS3ImagesToCSV(String name, boolean onlySupportedFile) {
         logger.info("Fetching all image URLs from S3 ...");
 
         S3Client s3 = S3Client.builder()
@@ -86,11 +88,9 @@ public class S3Service {
             logger.info("✅ CSV file created: {}", filePath);
         } catch (IOException e) {
             logger.error("❌ Error writing CSV file: {}", e.getMessage());
-            return "Error writing CSV file!";
         }
 
         logger.info("CSV file generation completed.");
-        return filePath;
     }
 
 

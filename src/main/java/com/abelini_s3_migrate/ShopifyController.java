@@ -28,7 +28,11 @@ public class ShopifyController {
     @PostMapping("/3/migrate")
     public String migrateImages(@RequestParam(required = false) String path) {
         String csvPath;
-        csvPath = Objects.requireNonNullElse(path, "src/main/resources/s3file/s3_url_list.csv");
+        if (path == null) {
+            csvPath = "src/main/resources/s3file/s3_url_list.csv";
+        } else {
+            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
+        }
         try {
             shopifyService.uploadImagesToShopify(csvPath);
             return "Migration started!";
@@ -37,33 +41,38 @@ public class ShopifyController {
         }
     }
 
-    @PostMapping("s3upload")
-    public String s3Upload(@RequestBody String path) {
-        try {
-            return shopifyService.uploadFileToShopify(path);
-        } catch (Exception e) {
-            return "Error: " + e.getMessage();
-        }
-    }
+//    @PostMapping("s3upload")
+//    public String s3Upload(@RequestBody String path) {
+//        try {
+//            return shopifyService.uploadFileToShopify(path);
+//        } catch (Exception e) {
+//            return "Error: " + e.getMessage();
+//        }
+//    }
 
     @PostMapping("/2/generate-csv")
     public String generateCsv(@RequestParam(required = false) String fileName,
                               @RequestParam(defaultValue = "false") boolean onlySupportedFile) {
         String name;
-        name = Objects.requireNonNullElse(fileName, "s3_url_list");
-        return s3Service.exportS3ImagesToCSV(name, onlySupportedFile);
+        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), "s3_url_list");
+        s3Service.exportS3ImagesToCSV(name, onlySupportedFile);
+        return "CSV file generation started! and fileName will be: " + name + ".csv";
     }
 
-    @GetMapping("/1/rename-files")
-    public String renameFiles() {
-        s3Service.renameAndCopyFiles();
-        return "Bulk file renaming and copying started!";
-    }
+//    @GetMapping("/1/rename-files")
+//    public String renameFiles() {
+//        s3Service.renameAndCopyFiles();
+//        return "Bulk file renaming and copying started!";
+//    }
 
     @GetMapping("/download-csv")
-    public ResponseEntity<?> downloadCsvFile(@RequestParam(required = false) String path) {
+    public ResponseEntity<?> downloadCsvFile(@RequestParam(required = false, name = "fileName") String path) {
         String csvPath;
-        csvPath = Objects.requireNonNullElse(path, "src/main/resources/s3file/s3_url_list.csv");
+        if (path == null) {
+            csvPath = "src/main/resources/s3file/s3_url_list.csv";
+        } else {
+            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
+        }
         File file = new File(csvPath);
 
         if (!file.exists()) {
