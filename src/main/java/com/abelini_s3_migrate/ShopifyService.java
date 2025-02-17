@@ -154,7 +154,7 @@ public class ShopifyService {
     }
 
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-            "image/png", "image/jpeg", "image/gif", "image/jpg"
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
     );
 
     private boolean notSupportedFileType(String fileUrl) {
