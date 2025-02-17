@@ -26,6 +26,7 @@ import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -65,16 +66,27 @@ public class ShopifyService {
         int batchSize = 100; // Send 100 files per batch
         ExecutorService executor = Executors.newFixedThreadPool(5); // Parallel execution
 
+        AtomicInteger activeBatches = new AtomicInteger(0);  // Track running batches
+        AtomicInteger completedBatches = new AtomicInteger(0); // Track completed batches
+
         int remainingCost = 2000; // Start with max available cost
 
         for (int i = 0; i < imageUrls.size(); i += batchSize) {
             List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
 
+            activeBatches.incrementAndGet(); // Increment active batch count
+            int batchNumber = activeBatches.get();
+
+            logger.info("Starting batch {} with {} images: {}", batchNumber, batch.size(), batch);
             executor.submit(() -> {
                 try {
                     registerBatchInShopify(batch);
+                    completedBatches.incrementAndGet(); // Increment completed batch count
+                    logger.info("Batch {} completed. Total completed: {}", batchNumber, completedBatches.get());
                 } catch (Exception e) {
-                    logger.error("Error uploading batch: {}", e.getMessage(), e);
+                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+                } finally {
+                    activeBatches.decrementAndGet();
                 }
             });
 
@@ -101,7 +113,7 @@ public class ShopifyService {
             Thread.currentThread().interrupt();
         }
 
-        logger.info("Bulk upload completed.");
+        logger.info("Bulk upload completed. Total batches completed: {}", completedBatches.get());
     }
 
     public void registerBatchInShopify(List<String> fileUrls) {
