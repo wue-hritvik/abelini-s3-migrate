@@ -26,16 +26,16 @@ import java.util.concurrent.Executor;
 public class S3Service {
     private static final Logger logger = LoggerFactory.getLogger(S3Service.class);
 
-    @Value("${aws.s3.bucket}")
+    @Value("${aws_s3_bucket}")
     private String bucketName;
 
-    @Value("${aws.s3.region}")
+    @Value("${aws_s3_region}")
     private String region;
 
-    @Value("${aws.accessKeyId}")
+    @Value("${aws_access_key}")
     private String accessKey;
 
-    @Value("${aws.secretAccessKey}")
+    @Value("${aws_secret_key}")
     private String secretKey;
     private final Executor executor;
 

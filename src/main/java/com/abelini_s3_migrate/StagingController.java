@@ -22,10 +22,10 @@ import java.util.regex.Pattern;
 @RestController
 @RequestMapping("/api/staging")
 public class StagingController {
-    @Value("${shopify.store}")
+    @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify.access.token}")
+    @Value("${shopify_access_token}")
     private String ACCESS_TOKEN;
     private static final Logger logger = LoggerFactory.getLogger(StagingController.class);
     private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2024-04/graphql.json";

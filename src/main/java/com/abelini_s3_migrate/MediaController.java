@@ -33,10 +33,10 @@ public class MediaController {
     private static final Set<String> SUPPORTED_MIME_TYPES = Set.of(
             "image/png", "image/jpeg", "image/gif", "video/mp4", "video/quicktime", "model/gltf-binary", "model/vnd.usdz+zip"
     );
-    @Value("${shopify.store}")
+    @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify.access.token}")
+    @Value("${shopify_access_token}")
     private String SHOPIFY_ACCESS_TOKEN;
     private  final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2024-04/graphql.json";
     private final RestTemplate restTemplate = new RestTemplate();

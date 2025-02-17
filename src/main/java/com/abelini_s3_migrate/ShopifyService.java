@@ -35,10 +35,10 @@ public class ShopifyService {
     private final Tika tika = new Tika();
     private final ObjectMapper objectMapper;
 
-    @Value("${shopify.store}")
+    @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify.access.token}")
+    @Value("${shopify_access_token}")
     private String accessToken;
 
     private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2025-01/graphql.json";
