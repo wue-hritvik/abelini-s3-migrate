@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/shopify")
@@ -24,10 +25,10 @@ public class ShopifyController {
         this.shopifyService = shopifyService;
     }
 
-    @PostMapping("/migrate")
-    public String migrateImages() {
-        String csvPath = s3Service.exportS3ImagesToCSV();
-//        String csvPath= "src/main/resources/s3file/s3_images.csv";
+    @PostMapping("/3/migrate")
+    public String migrateImages(@RequestParam(required = false) String path) {
+        String csvPath;
+        csvPath = Objects.requireNonNullElse(path, "src/main/resources/s3file/s3_url_list.csv");
         try {
             shopifyService.uploadImagesToShopify(csvPath);
             return "Migration started!";
@@ -36,22 +37,34 @@ public class ShopifyController {
         }
     }
 
-//    @PostMapping("/process-csv")
-//    public String processCsv() {
-////        String csvPath = s3Service.exportS3ImagesToCSV();
-//        String csvPath= "src/main/resources/s3file/s3_images.csv";
-//        try {
-//            shopifyService.processCsv(csvPath);
-//            return "Migration started!";
-//        } catch (Exception e) {
-//            return "Error: " + e.getMessage();
-//        }
-//    }
+    @PostMapping("s3upload")
+    public String s3Upload(@RequestBody String path) {
+        try {
+            return shopifyService.uploadFileToShopify(path);
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    @PostMapping("/2/generate-csv")
+    public String generateCsv(@RequestParam(required = false) String fileName,
+                              @RequestParam(defaultValue = "false") boolean onlySupportedFile) {
+        String name;
+        name = Objects.requireNonNullElse(fileName, "s3_url_list");
+        return s3Service.exportS3ImagesToCSV(name, onlySupportedFile);
+    }
+
+    @GetMapping("/1/rename-files")
+    public String renameFiles() {
+        s3Service.renameAndCopyFiles();
+        return "Bulk file renaming and copying started!";
+    }
 
     @GetMapping("/download-csv")
-    public ResponseEntity<?> downloadCsvFile() {
-        String filePath = "src/main/resources/s3file/s3_images.csv";
-        File file = new File(filePath);
+    public ResponseEntity<?> downloadCsvFile(@RequestParam(required = false) String path) {
+        String csvPath;
+        csvPath = Objects.requireNonNullElse(path, "src/main/resources/s3file/s3_url_list.csv");
+        File file = new File(csvPath);
 
         if (!file.exists()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("s3 file not found");
@@ -64,9 +77,9 @@ public class ShopifyController {
                 .body(fileResource);
     }
 
-//    @GetMapping("/check-status")
-//    public String checkMigrationStatus() {
-//        return shopifyService.checkMigrationStatus();
-//    }
+    @GetMapping("/test")
+    public String test() {
+        return "success";
+    }
 
 }
