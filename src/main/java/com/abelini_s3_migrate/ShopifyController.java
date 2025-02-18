@@ -19,10 +19,12 @@ import java.util.Objects;
 public class ShopifyController {
     private final S3Service s3Service;
     private final ShopifyService shopifyService;
+    private final ShopifyFileFetcherService shopifyFileFetcherService;
 
-    public ShopifyController(S3Service s3Service, ShopifyService shopifyService) {
+    public ShopifyController(S3Service s3Service, ShopifyService shopifyService, ShopifyFileFetcherService shopifyFileFetcherService) {
         this.s3Service = s3Service;
         this.shopifyService = shopifyService;
+        this.shopifyFileFetcherService = shopifyFileFetcherService;
     }
 
     @PostMapping("/3/migrate")
@@ -89,6 +91,18 @@ public class ShopifyController {
     @GetMapping("/test")
     public String test() {
         return "success";
+    }
+
+    @GetMapping("export/file-names")
+    public String exportFileNamesFromShopify(){
+        shopifyFileFetcherService.fetchAndStoreShopifyFiles();
+        return "export file names from shopify started";
+    }
+
+    @GetMapping("export/file-names/bulk")
+    public String exportFileNamesFromShopifyBulk(){
+        shopifyFileFetcherService.fetchAndStoreShopifyFilesBulk();
+        return "export file names from shopify bulk started";
     }
 
 }
