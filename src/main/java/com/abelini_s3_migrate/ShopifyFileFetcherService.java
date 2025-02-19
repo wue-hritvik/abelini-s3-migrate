@@ -3,7 +3,6 @@ package com.abelini_s3_migrate;
 import com.opencsv.CSVReader;
 import com.opencsv.CSVWriter;
 import com.opencsv.exceptions.CsvException;
-import com.opencsv.exceptions.CsvValidationException;
 import org.apache.tika.Tika;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -20,7 +19,6 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -28,8 +26,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 @Service
 public class ShopifyFileFetcherService {
@@ -397,6 +393,7 @@ public class ShopifyFileFetcherService {
     private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_bulk.csv";
     private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_image_urls.csv";
     private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
+    private static final String IMAGE_FILES_CSV = "src/main/resources/s3file/image_s3_urls.csv";
 
     // Supported MIME types for images.
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
@@ -410,14 +407,13 @@ public class ShopifyFileFetcherService {
         try {
             logger.info("Starting compareFileNames process ,at: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
-            // Start asynchronous S3 URL map creation.
-            List<String> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
-
-            // Read file names from the CSV (skipping header) into a Set for fast lookups.
             Set<String> fileNames = readCsvToSet(BULK_CSV_PATH, true);
 
+            // Start asynchronous S3 URL map creation.
+            List<String> missingUrls = createImageUrlMapAsync(S3_CSV_PATH, fileNames);
+
             // Compare file names and get list of missing image URLs.
-            List<String> missingUrls = findMissingUrls(fileNames, imageUrlMapTask);
+//            List<String> missingUrls = findMissingUrls(fileNames, imageUrlMapTask);
 
             // Write the missing URLs asynchronously.
             writeCsvAsync(MISSING_URLS_CSV, missingUrls, "image_missing_urls");
@@ -434,18 +430,20 @@ public class ShopifyFileFetcherService {
      * Creates an image URL map asynchronously by parsing the CSV file using CSVReader.readAll().
      *
      * @param s3CsvPath Path to the CSV file.
+     * @param fileNames
      * @return A map where the key is the extracted file name and the value is the URL.
      */
-    public List<String> createImageUrlMapAsync(String s3CsvPath) {
+    public List<String> createImageUrlMapAsync(String s3CsvPath, Set<String> fileNames) {
         logger.info("createImageUrlMapMultiThreaded started");
 
         // Use concurrent collections for thread safety.
         List<String> imageUrls = Collections.synchronizedList(new ArrayList<>());
-        List<String> otherUrls = Collections.synchronizedList(new ArrayList<>());
+        List<String> missingUrls = Collections.synchronizedList(new ArrayList<>());
 
         AtomicInteger totalUrls = new AtomicInteger(0);
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
+        AtomicInteger missingCounter = new AtomicInteger(0);
 
         // Fixed thread pool with 5 threads.
         ExecutorService executor = Executors.newFixedThreadPool(5);
@@ -499,7 +497,16 @@ public class ShopifyFileFetcherService {
                 try {
                     for (String[] row : batch) {
                         if (row.length > 0) {
-                            processUrlLine(row[0], imageUrls, otherUrls, totalUrls, imageCount, otherCount);
+                            processUrlLine(
+                                    row[0],
+                                    imageUrls,
+                                    totalUrls,
+                                    imageCount,
+                                    otherCount,
+                                    missingUrls,
+                                    fileNames,
+                                    missingCounter
+                            );
                             if (totalUrls.get() % 100000 == 0) {
                                 logger.info("Processed {} URLs so far. Image URLs: {}. Other URLs: {}",
                                         totalUrls.get(), imageCount.get(), otherCount.get());
@@ -507,7 +514,8 @@ public class ShopifyFileFetcherService {
                         }
                     }
                     int compCount = completeCounter.incrementAndGet();
-                    logger.info("Completed s3 url batch number {}. Total batches completed so far: {}", currBatch, compCount);
+                    logger.info("Completed s3 url batch number {}. Total batches completed so far: {} and missing urls: {}",
+                            currBatch, compCount, missingCounter.get());
                 } finally {
                     // Release the permit so the next batch can be processed.
                     semaphore.release();
@@ -526,13 +534,14 @@ public class ShopifyFileFetcherService {
         }
         executor.shutdown();
         records.clear();
+        fileNames.clear();
 
-        logger.info("createImageUrlAsync ended");
-        logger.info("Total S3 URLs processed: {}. Image URLs: {}. Other URLs: {}.",
-                totalUrls.get(), imageCount.get(), otherCount.get());
+        logger.info("createImageUrlMapAsync ended");
+        logger.info("Total S3 URLs processed: {}. Image URLs: {}. Other URLs: {}. Missing URLs: {}",
+                totalUrls.get(), imageCount.get(), otherCount.get(), missingCounter.get());
 
-        // Write the other URLs asynchronously.
-        writeCsvAsync(OTHER_FILES_CSV, otherUrls, "other_file_urls");
+        // Write the image URLs asynchronously.
+        writeCsvAsync(IMAGE_FILES_CSV, imageUrls, "image_urls");
 
         return imageUrls;
     }
@@ -540,24 +549,29 @@ public class ShopifyFileFetcherService {
     /**
      * Processes a single CSV line by checking if it is a supported image URL.
      *
-     * @param line       the CSV cell value (URL).
-     * @param imageUrls  list to store  URLs.
-     * @param otherUrls  list to store URLs that are not supported images.
-     * @param totalUrls  counter for total processed URLs.
-     * @param imageCount counter for supported image URLs.
-     * @param otherCount counter for other URLs.
+     * @param line           the CSV cell value (URL).
+     * @param imageUrls      list to store  URLs.
+     * @param totalUrls      counter for total processed URLs.
+     * @param imageCount     counter for supported image URLs.
+     * @param otherCount     counter for other URLs.
+     * @param fileNames
+     * @param missingCounter
      */
-    private void processUrlLine(String line, List<String> imageUrls, List<String> otherUrls,
-                                AtomicInteger totalUrls, AtomicInteger imageCount, AtomicInteger otherCount) {
+    private void processUrlLine(String line, List<String> imageUrls,
+                                AtomicInteger totalUrls, AtomicInteger imageCount, AtomicInteger otherCount, List<String> missingUrls, Set<String> fileNames, AtomicInteger missingCounter) {
         totalUrls.incrementAndGet();
         String url = line.trim().replaceAll("^\"|\"$", "");
 
         // Check using Tika MIME detection or your own logic.
         if (!isSupportedImage(url)) {
-            otherUrls.add(url);
             otherCount.incrementAndGet();
         } else {
             imageUrls.add(url);
+            String fileName = extractFileNameFromUrl(url);
+            if (!fileNames.contains(fileName)) {
+                missingUrls.add(url);
+                missingCounter.incrementAndGet();
+            }
             imageCount.incrementAndGet();
         }
     }
