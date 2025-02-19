@@ -406,7 +406,7 @@ public class ShopifyFileFetcherService {
     @Async
     public CompletableFuture<Void> compareFileNames() {
         try {
-            logger.info("Starting compareFileNames process.");
+            logger.info("Starting compareFileNames process ,at: {}" , ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
             // Start asynchronous S3 URL map creation.
             CompletableFuture<Map<String, String>> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
@@ -424,7 +424,7 @@ public class ShopifyFileFetcherService {
             // Write the missing URLs asynchronously.
             writeCsvAsync(MISSING_URLS_CSV, missingUrls, "image_missing_urls");
 
-            logger.info("compareFileNames process completed.");
+            logger.info("compareFileNames process completed. Total missing URLs found: {}   ,at: {}" ,missingUrls.size(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
         } catch (Exception e) {
             logger.error("Error in compareFileNames: ", e);
