@@ -438,22 +438,26 @@ public class ShopifyFileFetcherService {
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
 
-        try (BufferedReader reader = Files.newBufferedReader(Paths.get(s3CsvPath))) {
-            // Optionally skip header line if present.
-            String firstLine = reader.readLine();
-            if (firstLine != null && looksLikeHeader(firstLine)) {
-                logger.info("Skipping header in S3 CSV: {}", firstLine);
-            } else if (firstLine != null) {
-                // Process the first line if it doesn't look like a header.
-                processUrlLine(firstLine, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
-            }
+        try {
+            // Read all lines from the CSV file
+            List<String> lines = Files.readAllLines(Paths.get(s3CsvPath));
 
-            // Process remaining lines sequentially.
-            String line;
-            while ((line = reader.readLine()) != null) {
-                processUrlLine(line, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+            if (!lines.isEmpty()) {
+                // Process the first line (header check)
+                String firstLine = lines.get(0);
+                if (looksLikeHeader(firstLine)) {
+                    logger.info("Skipping header in S3 CSV: {}", firstLine);
+                } else {
+                    // Process the first line if it doesn't look like a header.
+                    processUrlLine(firstLine, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+                }
+
+                // Process remaining lines sequentially (starting from index 1 if header was skipped)
+                for (int i = 1; i < lines.size(); i++) {
+                    processUrlLine(lines.get(i), imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+                }
             }
-            logger.info("createImageUrlMapAsync started ended");
+            logger.info("createImageUrlMapAsync ended");
         } catch (IOException e) {
             logger.error("Error reading S3 CSV file: ", e);
         }
@@ -505,24 +509,24 @@ public class ShopifyFileFetcherService {
      */
     public Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException {
         logger.info("readCsvToSet started");
-        AtomicInteger fileNameCount = new AtomicInteger(0);
         Set<String> fileNames = new HashSet<>();
-        try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
-            if (skipHeader) {
-                String header = reader.readLine();
-                if (header != null) {
-                    logger.info("Skipping header in file {}: {}", filePath, header);
-                }
-            }
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String trimmedLine = line.trim().replaceAll("^\"|\"$", "");
-                fileNames.add(trimmedLine);
-                fileNameCount.incrementAndGet();
-            }
+
+        // Read all lines from the CSV file
+        List<String> lines = Files.readAllLines(Paths.get(filePath));
+        int startIndex = 0;
+
+        if (skipHeader && !lines.isEmpty()) {
+            logger.info("Skipping header in file {}: {}", filePath, lines.get(0));
+            startIndex = 1;
         }
+
+        for (int i = startIndex; i < lines.size(); i++) {
+            String trimmedLine = lines.get(i).trim().replaceAll("^\"|\"$", "");
+            fileNames.add(trimmedLine);
+        }
+
         logger.info("readCsvToSet ended");
-        logger.info("Finished reading file names from {}. Count: {}", filePath, fileNameCount.get());
+        logger.info("Finished reading file names from {}. Count: {}", filePath, fileNames.size());
         return fileNames;
     }
 
@@ -578,7 +582,7 @@ public class ShopifyFileFetcherService {
                         writeHeader = true;
                     } else {
                         // Check if the file already has a header.
-                        try (BufferedReader br = Files.newBufferedReader(filePath)) {
+                        try (var br = Files.newBufferedReader(filePath)) {
                             String firstLine = br.readLine();
                             if (firstLine == null || !firstLine.trim().equals(header)) {
                                 writeHeader = true;
@@ -587,15 +591,13 @@ public class ShopifyFileFetcherService {
                     }
                 }
 
-                try (BufferedWriter writer = Files.newBufferedWriter(filePath,
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
-                    if (writeHeader) {
-                        writer.write(header);
-                        writer.newLine();
+                // Use FileWriter in append mode
+                try (CSVWriter writer = new CSVWriter(new FileWriter(fileName, true))) {
+                    if (writeHeader && header != null) {
+                        writer.writeNext(new String[]{header});
                     }
                     for (String line : data) {
-                        writer.write(line);
-                        writer.newLine();
+                        writer.writeNext(new String[]{line});
                     }
                 }
                 logger.info("Finished writing file: {} with {} records.", fileName, data.size());
