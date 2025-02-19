@@ -465,7 +465,7 @@ public class ShopifyFileFetcherService {
             }
         }
 
-        final int BATCH_SIZE = 100000;
+        final int BATCH_SIZE = 50000;
         int totalRecords = records.size() - startIndex;
         logger.info("Total records to process: {}", totalRecords);
 
@@ -573,7 +573,7 @@ public class ShopifyFileFetcherService {
             startIndex = 1;
         }
 
-        final int BATCH_SIZE = 100000;
+        final int BATCH_SIZE = 50000;
         int totalRecords = records.size() - startIndex;
         logger.info("Total records to process: {}", totalRecords);
 
