@@ -105,4 +105,10 @@ public class ShopifyController {
         return "export file names from shopify bulk started";
     }
 
+    @GetMapping("compare/files-names")
+    public String compareFileNames(){
+        shopifyFileFetcherService.compareFileNames();
+        return "compare file names started";
+    }
+
 }

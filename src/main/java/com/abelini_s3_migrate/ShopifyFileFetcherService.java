@@ -1,8 +1,12 @@
 package com.abelini_s3_migrate;
 
+import com.opencsv.CSVReader;
 import com.opencsv.CSVWriter;
+import com.opencsv.exceptions.CsvValidationException;
+import org.apache.tika.Tika;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
@@ -12,14 +16,19 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Service
 public class ShopifyFileFetcherService {
@@ -40,6 +49,7 @@ public class ShopifyFileFetcherService {
     private static final AtomicInteger totalFilesStored = new AtomicInteger(0);
     private static final AtomicInteger batchNumber = new AtomicInteger(1); // AtomicInteger for thread-safe batch number
     private static final Logger LOGGER = Logger.getLogger(ShopifyFileFetcherService.class.getName());
+    private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ShopifyFileFetcherService.class);
     private final RestTemplate restTemplate = new RestTemplate();
 
     public ShopifyFileFetcherService() {
@@ -381,4 +391,249 @@ public class ShopifyFileFetcherService {
         }
     }
 
+    private static final String S3_CSV_PATH = "src/main/resources/s3file/abelini_s3_urls.csv";
+    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_bulk.csv";
+    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_image_urls.csv";
+    private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
+
+    // Supported MIME types for images.
+    private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+    );
+
+    private final Tika tika = new Tika();
+
+    @Async
+    public CompletableFuture<Void> compareFileNames() {
+        try {
+            logger.info("Starting compareFileNames process.");
+
+            // Start asynchronous S3 URL map creation.
+            CompletableFuture<Map<String, String>> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
+
+            // Read file names from the CSV (skipping header) into a Set for fast lookups.
+            Set<String> fileNames = readCsvToSet(BULK_CSV_PATH, true);
+            logger.info("Total file names processed: {}", fileNames.size());
+
+            // Wait for the S3 URL map task to complete.
+            Map<String, String> imageUrlMap = imageUrlMapTask.get();
+
+            // Compare file names and get list of missing image URLs.
+            List<String> missingUrls = findMissingUrls(fileNames, imageUrlMap);
+
+            // Write the missing URLs asynchronously.
+            writeCsvAsync(MISSING_URLS_CSV, missingUrls, "image_missing_urls");
+
+            logger.info("compareFileNames process completed.");
+
+        } catch (Exception e) {
+            logger.error("Error in compareFileNames: ", e);
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Async
+    public CompletableFuture<Map<String, String>> createImageUrlMapAsync(String s3CsvPath) {
+        // Use a thread-safe ConcurrentHashMap for image URLs.
+        Map<String, String> imageUrlMap = new ConcurrentHashMap<>();
+        // Use a synchronized list for other URLs.
+        List<String> otherUrls = Collections.synchronizedList(new ArrayList<>());
+
+        // Atomic counters for logging.
+        AtomicInteger totalUrls = new AtomicInteger(0);
+        AtomicInteger imageCount = new AtomicInteger(0);
+        AtomicInteger otherCount = new AtomicInteger(0);
+
+        try (BufferedReader reader = Files.newBufferedReader(Paths.get(s3CsvPath))) {
+            // Optionally skip header line if present.
+            String firstLine = reader.readLine();
+            if (firstLine != null && looksLikeHeader(firstLine)) {
+                logger.info("Skipping header in S3 CSV: {}", firstLine);
+            } else if (firstLine != null) {
+                // Process the first line if it doesn't look like a header.
+                processUrlLine(firstLine, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+            }
+
+            // Process remaining lines in parallel.
+            reader.lines().parallel().forEach(line ->
+                    processUrlLine(line, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount)
+            );
+        } catch (IOException e) {
+            logger.error("Error reading S3 CSV file: ", e);
+        }
+
+        logger.info("Total S3 URLs processed: {}. Image URLs: {}. Other URLs: {}.",
+                totalUrls.get(), imageCount.get(), otherCount.get());
+
+        // Write the other URLs asynchronously.
+        writeCsvAsync(OTHER_FILES_CSV, otherUrls, "other_file_urls");
+
+        return CompletableFuture.completedFuture(imageUrlMap);
+    }
+
+    private void processUrlLine(String line, Map<String, String> imageUrlMap, List<String> otherUrls,
+                                AtomicInteger totalUrls, AtomicInteger imageCount, AtomicInteger otherCount) {
+        totalUrls.incrementAndGet();
+        String url = line.trim().replaceAll("^\"|\"$", "");
+
+        // Check using Tika MIME detection.
+        if (!isSupportedImage(url)) {
+            otherUrls.add(url);
+            otherCount.incrementAndGet();
+        } else {
+            String fileName = extractFileNameFromUrl(url);
+            if (fileName != null) {
+                imageUrlMap.put(fileName, url);
+                imageCount.incrementAndGet();
+            }
+        }
+    }
+
+    /**
+     * Reads a CSV file (skipping header if specified) and returns a Set of trimmed lines.
+     */
+    private Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException {
+        AtomicInteger fileNameCount = new AtomicInteger(0);
+        try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
+            // Optionally skip header.
+            if (skipHeader) {
+                String header = reader.readLine();
+                if (header != null) {
+                    logger.info("Skipping header in file {}: {}", filePath, header);
+                }
+            }
+            Set<String> fileNames = reader.lines().parallel()
+                    .map(line -> line.trim().replaceAll("^\"|\"$", ""))
+                    .peek(line -> fileNameCount.incrementAndGet())
+                    .collect(Collectors.toSet());
+            logger.info("Finished reading file names from {}. Count: {}", filePath, fileNameCount.get());
+            return fileNames;
+        }
+    }
+
+    /**
+     * Returns true if the provided line appears to be a header.
+     * A simple heuristic: if the line does not start with "http" and is not empty.
+     */
+    private boolean looksLikeHeader(String line) {
+        return !line.toLowerCase().startsWith("http") && !line.trim().isEmpty();
+    }
+
+    /**
+     * Compares the file names from the bulk file with the image URL map and returns a list of URLs that are missing.
+     */
+    private List<String> findMissingUrls(Set<String> fileNames, Map<String, String> imageUrlMap) {
+        AtomicInteger comparisonCounter = new AtomicInteger(0);
+        List<String> missingUrls = imageUrlMap.entrySet().parallelStream()
+                .filter(entry -> {
+                    int count = comparisonCounter.incrementAndGet();
+                    // Log every 10,000 comparisons.
+                    if (count % 10000 == 0) {
+                        logger.info("Processed {} comparisons so far.", count);
+                    }
+                    return !fileNames.contains(entry.getKey());
+                })
+                .map(Map.Entry::getValue)
+                .collect(Collectors.toList());
+
+        logger.info("Total comparisons made: {}", comparisonCounter.get());
+        logger.info("Total missing URLs found: {}", missingUrls.size());
+        return missingUrls;
+    }
+
+    /**
+     * Asynchronously writes data to a CSV file.
+     * If a header is provided and the file does not already exist or lacks a header, the header is written.
+     * If the file exists and already has a header, only the data is appended.
+     *
+     * @param fileName The path of the file to write.
+     * @param data     The list of lines to write.
+     * @param header   The header to write (or null if none).
+     */
+    @Async
+    public void writeCsvAsync(String fileName, List<String> data, String header) {
+        CompletableFuture.runAsync(() -> {
+            try {
+                Path filePath = Paths.get(fileName);
+                // Ensure the parent directory exists.
+                if (filePath.getParent() != null) {
+                    Files.createDirectories(filePath.getParent());
+                }
+
+                // Determine whether to write header:
+                boolean writeHeader = false;
+                if (header != null) {
+                    if (!Files.exists(filePath)) {
+                        writeHeader = true;
+                    } else {
+                        // Check if the file already has a header.
+                        try (BufferedReader br = Files.newBufferedReader(filePath)) {
+                            String firstLine = br.readLine();
+                            if (firstLine == null || !firstLine.trim().equals(header)) {
+                                writeHeader = true;
+                            }
+                        }
+                    }
+                }
+
+                // Open the writer. If file exists, append; otherwise, create a new file.
+                BufferedWriter writer = Files.newBufferedWriter(filePath,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+
+                if (writeHeader) {
+                    writer.write(header);
+                    writer.newLine();
+                }
+                for (String line : data) {
+                    writer.write(line);
+                    writer.newLine();
+                }
+                writer.close();
+                logger.info("Finished writing file: {} with {} records.", fileName, data.size());
+            } catch (IOException e) {
+                logger.error("Error writing CSV file: " + fileName, e);
+            }
+        });
+    }
+
+    /**
+     * Extracts a file name from a URL by taking the substring after ".com/" and replacing "/" with "_".
+     */
+    private String extractFileNameFromUrl(String fileUrl) {
+        try {
+            return fileUrl.substring(fileUrl.indexOf(".com/") + 5)
+                    .replace("/", "_")
+                    .replaceAll("\\s+", "_");
+        } catch (Exception e) {
+            logger.error("Error extracting file name from URL: " + fileUrl, e);
+            return null;
+        }
+    }
+
+    /**
+     * Uses Tika to detect the MIME type of the given URL (or filename).
+     */
+    private String detectMimeType(String filename) {
+        try {
+            return tika.detect(filename);
+        } catch (Exception e) {
+            logger.warn("Could not detect MIME type for {}. Defaulting to image/jpeg", filename);
+            return "image/jpeg";
+        }
+    }
+
+    /**
+     * Returns true if the file URL is NOT a supported image type.
+     */
+    private boolean isSupportedImage(String fileUrl) {
+        String lowerUrl = fileUrl.toLowerCase();
+        // Check file extension directly
+        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
+                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
+            return true;
+        }
+        // Optionally, use Tika if you want to be extra sure:
+        String mimeType = detectMimeType(fileUrl);
+        return SUPPORTED_IMAGE_MIME_TYPES.contains(mimeType);
+    }
 }
