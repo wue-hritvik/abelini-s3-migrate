@@ -409,17 +409,14 @@ public class ShopifyFileFetcherService {
             logger.info("Starting compareFileNames process ,at: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
             // Start asynchronous S3 URL map creation.
-            CompletableFuture<Map<String, String>> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
+            Map<String, String> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
 
             // Read file names from the CSV (skipping header) into a Set for fast lookups.
             Set<String> fileNames = readCsvToSet(BULK_CSV_PATH, true);
             logger.info("Total file names processed: {}", fileNames.size());
 
-            // Wait for the S3 URL map task to complete.
-            Map<String, String> imageUrlMap = imageUrlMapTask.get();
-
             // Compare file names and get list of missing image URLs.
-            List<String> missingUrls = findMissingUrls(fileNames, imageUrlMap);
+            List<String> missingUrls = findMissingUrls(fileNames, imageUrlMapTask);
 
             // Write the missing URLs asynchronously.
             writeCsvAsync(MISSING_URLS_CSV, missingUrls, "image_missing_urls");
@@ -432,9 +429,7 @@ public class ShopifyFileFetcherService {
         return CompletableFuture.completedFuture(null);
     }
 
-    @Async
-
-    public CompletableFuture<Map<String, String>> createImageUrlMapAsync(String s3CsvPath) {
+    public Map<String, String> createImageUrlMapAsync(String s3CsvPath) {
         logger.info("createImageUrlMapAsync started");
         Map<String, String> imageUrlMap = new HashMap<>();
         List<String> otherUrls = new ArrayList<>();
@@ -469,7 +464,7 @@ public class ShopifyFileFetcherService {
         // Write the other URLs asynchronously.
         writeCsvAsync(OTHER_FILES_CSV, otherUrls, "other_file_urls");
 
-        return CompletableFuture.completedFuture(imageUrlMap);
+        return imageUrlMap;
     }
 
     /**
@@ -566,7 +561,7 @@ public class ShopifyFileFetcherService {
      * @param data     list of lines to write.
      * @param header   header string to write (or null if none).
      */
-    @Async
+
     public void writeCsvAsync(String fileName, List<String> data, String header) {
         logger.info("started writing csv to async filename ::{}", fileName);
         CompletableFuture.runAsync(() -> {
