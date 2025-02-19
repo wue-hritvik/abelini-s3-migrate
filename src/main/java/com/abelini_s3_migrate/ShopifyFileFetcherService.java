@@ -81,24 +81,24 @@ public class ShopifyFileFetcherService {
             String afterClause = (cursor != null && !cursor.isEmpty()) ? String.format(", after: \"%s\"", cursor) : "";
 
             String query = """
-                {
-                    files(first: 250, sortKey: CREATED_AT, query: "created_at:>=2025-02-16"%s) {
-                        edges {
-                            node {
-                                preview {
-                                    image {
-                                        altText
+                    {
+                        files(first: 250, sortKey: CREATED_AT, query: "created_at:>=2025-02-16"%s) {
+                            edges {
+                                node {
+                                    preview {
+                                        image {
+                                            altText
+                                        }
                                     }
                                 }
                             }
-                        }
-                        pageInfo {
-                            hasNextPage
-                            endCursor
+                            pageInfo {
+                                hasNextPage
+                                endCursor
+                            }
                         }
                     }
-                }
-                """.formatted(afterClause);
+                    """.formatted(afterClause);
 
             try {
                 JSONObject response = executeGraphQLQuery(query);
@@ -194,21 +194,21 @@ public class ShopifyFileFetcherService {
 
         // Step 1: Initiate the bulk operation with a mutation.
         String mutation = """
-            mutation {
-              bulkOperationRunQuery(
-                query: "{ files(query: \\"created_at:>=2025-02-16\\") { edges { node { preview { image { altText } } } } } }"
-              ) {
-                bulkOperation {
-                  id
-                  status
+                mutation {
+                  bulkOperationRunQuery(
+                    query: "{ files(query: \\"created_at:>=2025-02-16\\") { edges { node { preview { image { altText } } } } } }"
+                  ) {
+                    bulkOperation {
+                      id
+                      status
+                    }
+                    userErrors {
+                      field
+                      message
+                    }
+                  }
                 }
-                userErrors {
-                  field
-                  message
-                }
-              }
-            }
-            """;
+                """;
 
         JSONObject startResponse = executeGraphQLQuery(mutation);
         if (startResponse.has("errors") || startResponse
@@ -252,19 +252,19 @@ public class ShopifyFileFetcherService {
      */
     private JSONObject pollBulkOperation() {
         String query = """
-            {
-              currentBulkOperation {
-                id
-                status
-                errorCode
-                createdAt
-                completedAt
-                objectCount
-                fileSize
-                url
-              }
-            }
-            """;
+                {
+                  currentBulkOperation {
+                    id
+                    status
+                    errorCode
+                    createdAt
+                    completedAt
+                    objectCount
+                    fileSize
+                    url
+                  }
+                }
+                """;
 
         while (true) {  // Infinite loop, will break when operation completes or fails
             try {
@@ -406,7 +406,7 @@ public class ShopifyFileFetcherService {
     @Async
     public CompletableFuture<Void> compareFileNames() {
         try {
-            logger.info("Starting compareFileNames process ,at: {}" , ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
+            logger.info("Starting compareFileNames process ,at: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
             // Start asynchronous S3 URL map creation.
             CompletableFuture<Map<String, String>> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
@@ -424,7 +424,7 @@ public class ShopifyFileFetcherService {
             // Write the missing URLs asynchronously.
             writeCsvAsync(MISSING_URLS_CSV, missingUrls, "image_missing_urls");
 
-            logger.info("compareFileNames process completed. Total missing URLs found: {}   ,at: {}" ,missingUrls.size(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
+            logger.info("compareFileNames process completed. Total missing URLs found: {}   ,at: {}", missingUrls.size(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
         } catch (Exception e) {
             logger.error("Error in compareFileNames: ", e);
@@ -433,13 +433,12 @@ public class ShopifyFileFetcherService {
     }
 
     @Async
-    public CompletableFuture<Map<String, String>> createImageUrlMapAsync(String s3CsvPath) {
-        // Use a thread-safe ConcurrentHashMap for image URLs.
-        Map<String, String> imageUrlMap = new ConcurrentHashMap<>();
-        // Use a synchronized list for other URLs.
-        List<String> otherUrls = Collections.synchronizedList(new ArrayList<>());
 
-        // Atomic counters for logging.
+    public CompletableFuture<Map<String, String>> createImageUrlMapAsync(String s3CsvPath) {
+        logger.info("createImageUrlMapAsync started");
+        Map<String, String> imageUrlMap = new HashMap<>();
+        List<String> otherUrls = new ArrayList<>();
+
         AtomicInteger totalUrls = new AtomicInteger(0);
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
@@ -454,10 +453,12 @@ public class ShopifyFileFetcherService {
                 processUrlLine(firstLine, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
             }
 
-            // Process remaining lines in parallel.
-            reader.lines().parallel().forEach(line ->
-                    processUrlLine(line, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount)
-            );
+            // Process remaining lines sequentially.
+            String line;
+            while ((line = reader.readLine()) != null) {
+                processUrlLine(line, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+            }
+            logger.info("createImageUrlMapAsync started ended");
         } catch (IOException e) {
             logger.error("Error reading S3 CSV file: ", e);
         }
@@ -471,6 +472,16 @@ public class ShopifyFileFetcherService {
         return CompletableFuture.completedFuture(imageUrlMap);
     }
 
+    /**
+     * Processes a single CSV line by checking if it is a supported image URL.
+     *
+     * @param line        the CSV line.
+     * @param imageUrlMap map to store fileName to URL mapping.
+     * @param otherUrls   list to store URLs that are not supported images.
+     * @param totalUrls   counter for total processed URLs.
+     * @param imageCount  counter for supported image URLs.
+     * @param otherCount  counter for other URLs.
+     */
     private void processUrlLine(String line, Map<String, String> imageUrlMap, List<String> otherUrls,
                                 AtomicInteger totalUrls, AtomicInteger imageCount, AtomicInteger otherCount) {
         totalUrls.incrementAndGet();
@@ -490,52 +501,58 @@ public class ShopifyFileFetcherService {
     }
 
     /**
-     * Reads a CSV file (skipping header if specified) and returns a Set of trimmed lines.
+     * Reads a CSV file (optionally skipping the header) and returns a Set of trimmed lines.
+     *
+     * @param filePath   the CSV file path.
+     * @param skipHeader true to skip the first header line.
+     * @return a set of lines.
+     * @throws IOException if an I/O error occurs.
      */
-    private Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException {
+    public Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException {
+        logger.info("readCsvToSet started");
         AtomicInteger fileNameCount = new AtomicInteger(0);
+        Set<String> fileNames = new HashSet<>();
         try (BufferedReader reader = Files.newBufferedReader(Paths.get(filePath))) {
-            // Optionally skip header.
             if (skipHeader) {
                 String header = reader.readLine();
                 if (header != null) {
                     logger.info("Skipping header in file {}: {}", filePath, header);
                 }
             }
-            Set<String> fileNames = reader.lines().parallel()
-                    .map(line -> line.trim().replaceAll("^\"|\"$", ""))
-                    .peek(line -> fileNameCount.incrementAndGet())
-                    .collect(Collectors.toSet());
-            logger.info("Finished reading file names from {}. Count: {}", filePath, fileNameCount.get());
-            return fileNames;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmedLine = line.trim().replaceAll("^\"|\"$", "");
+                fileNames.add(trimmedLine);
+                fileNameCount.incrementAndGet();
+            }
         }
+        logger.info("readCsvToSet ended");
+        logger.info("Finished reading file names from {}. Count: {}", filePath, fileNameCount.get());
+        return fileNames;
     }
 
     /**
-     * Returns true if the provided line appears to be a header.
-     * A simple heuristic: if the line does not start with "http" and is not empty.
+     * Compares file names from a bulk file with the image URL map and returns URLs that are missing.
+     *
+     * @param fileNames   set of file names from the bulk file.
+     * @param imageUrlMap map of image file names to URLs.
+     * @return a list of missing URLs.
      */
-    private boolean looksLikeHeader(String line) {
-        return !line.toLowerCase().startsWith("http") && !line.trim().isEmpty();
-    }
-
-    /**
-     * Compares the file names from the bulk file with the image URL map and returns a list of URLs that are missing.
-     */
-    private List<String> findMissingUrls(Set<String> fileNames, Map<String, String> imageUrlMap) {
+    public List<String> findMissingUrls(Set<String> fileNames, Map<String, String> imageUrlMap) {
+        logger.info("started comparing files");
         AtomicInteger comparisonCounter = new AtomicInteger(0);
-        List<String> missingUrls = imageUrlMap.entrySet().parallelStream()
-                .filter(entry -> {
-                    int count = comparisonCounter.incrementAndGet();
-                    // Log every 10,000 comparisons.
-                    if (count % 10000 == 0) {
-                        logger.info("Processed {} comparisons so far.", count);
-                    }
-                    return !fileNames.contains(entry.getKey());
-                })
-                .map(Map.Entry::getValue)
-                .collect(Collectors.toList());
+        List<String> missingUrls = new ArrayList<>();
 
+        for (Map.Entry<String, String> entry : imageUrlMap.entrySet()) {
+            int count = comparisonCounter.incrementAndGet();
+            if (count % 10000 == 0) {
+                logger.info("Processed {} comparisons so far.", count);
+            }
+            if (!fileNames.contains(entry.getKey())) {
+                missingUrls.add(entry.getValue());
+            }
+        }
+        logger.info("file comparison completed");
         logger.info("Total comparisons made: {}", comparisonCounter.get());
         logger.info("Total missing URLs found: {}", missingUrls.size());
         return missingUrls;
@@ -543,15 +560,15 @@ public class ShopifyFileFetcherService {
 
     /**
      * Asynchronously writes data to a CSV file.
-     * If a header is provided and the file does not already exist or lacks a header, the header is written.
-     * If the file exists and already has a header, only the data is appended.
+     * If a header is provided and the file does not exist or lacks a header, the header is written.
      *
-     * @param fileName The path of the file to write.
-     * @param data     The list of lines to write.
-     * @param header   The header to write (or null if none).
+     * @param fileName the path of the file to write.
+     * @param data     list of lines to write.
+     * @param header   header string to write (or null if none).
      */
     @Async
     public void writeCsvAsync(String fileName, List<String> data, String header) {
+        logger.info("started writing csv to async filename ::{}", fileName);
         CompletableFuture.runAsync(() -> {
             try {
                 Path filePath = Paths.get(fileName);
@@ -560,7 +577,6 @@ public class ShopifyFileFetcherService {
                     Files.createDirectories(filePath.getParent());
                 }
 
-                // Determine whether to write header:
                 boolean writeHeader = false;
                 if (header != null) {
                     if (!Files.exists(filePath)) {
@@ -576,19 +592,17 @@ public class ShopifyFileFetcherService {
                     }
                 }
 
-                // Open the writer. If file exists, append; otherwise, create a new file.
-                BufferedWriter writer = Files.newBufferedWriter(filePath,
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
-
-                if (writeHeader) {
-                    writer.write(header);
-                    writer.newLine();
+                try (BufferedWriter writer = Files.newBufferedWriter(filePath,
+                        StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+                    if (writeHeader) {
+                        writer.write(header);
+                        writer.newLine();
+                    }
+                    for (String line : data) {
+                        writer.write(line);
+                        writer.newLine();
+                    }
                 }
-                for (String line : data) {
-                    writer.write(line);
-                    writer.newLine();
-                }
-                writer.close();
                 logger.info("Finished writing file: {} with {} records.", fileName, data.size());
             } catch (IOException e) {
                 logger.error("Error writing CSV file: " + fileName, e);
@@ -598,8 +612,11 @@ public class ShopifyFileFetcherService {
 
     /**
      * Extracts a file name from a URL by taking the substring after ".com/" and replacing "/" with "_".
+     *
+     * @param fileUrl the URL string.
+     * @return the extracted file name, or null if extraction fails.
      */
-    private String extractFileNameFromUrl(String fileUrl) {
+    public String extractFileNameFromUrl(String fileUrl) {
         try {
             return fileUrl.substring(fileUrl.indexOf(".com/") + 5)
                     .replace("/", "_")
@@ -611,9 +628,12 @@ public class ShopifyFileFetcherService {
     }
 
     /**
-     * Uses Tika to detect the MIME type of the given URL (or filename).
+     * Uses Tika to detect the MIME type of the given filename.
+     *
+     * @param filename the filename or URL.
+     * @return the detected MIME type.
      */
-    private String detectMimeType(String filename) {
+    public String detectMimeType(String filename) {
         try {
             return tika.detect(filename);
         } catch (Exception e) {
@@ -623,17 +643,31 @@ public class ShopifyFileFetcherService {
     }
 
     /**
-     * Returns true if the file URL is NOT a supported image type.
+     * Checks if the provided URL points to a supported image type.
+     *
+     * @param fileUrl the URL to check.
+     * @return true if it is a supported image, false otherwise.
      */
-    private boolean isSupportedImage(String fileUrl) {
+    public boolean isSupportedImage(String fileUrl) {
         String lowerUrl = fileUrl.toLowerCase();
-        // Check file extension directly
+        // Quick check based on file extension.
         if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
                 lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
             return true;
         }
-        // Optionally, use Tika if you want to be extra sure:
+        // Fallback: detect MIME type.
         String mimeType = detectMimeType(fileUrl);
         return SUPPORTED_IMAGE_MIME_TYPES.contains(mimeType);
+    }
+
+    /**
+     * Determines if a given line looks like a header.
+     * (If it does not start with "http" and is not empty.)
+     *
+     * @param line the line to check.
+     * @return true if the line is considered a header.
+     */
+    public boolean looksLikeHeader(String line) {
+        return !line.toLowerCase().startsWith("http") && !line.trim().isEmpty();
     }
 }
