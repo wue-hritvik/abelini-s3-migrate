@@ -411,7 +411,7 @@ public class ShopifyFileFetcherService {
             logger.info("Starting compareFileNames process ,at: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
             // Start asynchronous S3 URL map creation.
-            Map<String, String> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
+            List<String> imageUrlMapTask = createImageUrlMapAsync(S3_CSV_PATH);
 
             // Read file names from the CSV (skipping header) into a Set for fast lookups.
             Set<String> fileNames = readCsvToSet(BULK_CSV_PATH, true);
@@ -436,10 +436,10 @@ public class ShopifyFileFetcherService {
      * @param s3CsvPath Path to the CSV file.
      * @return A map where the key is the extracted file name and the value is the URL.
      */
-    public Map<String, String> createImageUrlMapAsync(String s3CsvPath) {
+    public List<String> createImageUrlMapAsync(String s3CsvPath) {
         logger.info("createImageUrlMapMultiThreaded started");
         // Use concurrent collections for thread safety.
-        Map<String, String> imageUrlMap = new ConcurrentHashMap<>();
+        List<String> imageUrls = Collections.synchronizedList(new ArrayList<>());
         List<String> otherUrls = Collections.synchronizedList(new ArrayList<>());
 
         AtomicInteger totalUrls = new AtomicInteger(0);
@@ -452,7 +452,7 @@ public class ShopifyFileFetcherService {
             records = reader.readAll();
         } catch (IOException | CsvException e) {
             logger.error("Error reading S3 CSV file: ", e);
-            return imageUrlMap;
+            return imageUrls;
         }
 
         // Determine if the first row is a header.
@@ -484,7 +484,7 @@ public class ShopifyFileFetcherService {
             Future<?> future = executor.submit(() -> {
                 for (String[] row : batch) {
                     if (row.length > 0) {
-                        processUrlLine(row[0], imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+                        processUrlLine(row[0], imageUrls, otherUrls, totalUrls, imageCount, otherCount);
                         if (totalUrls.get() % 100000 == 0) {
                             logger.info("Processed {} URLs so far. Image URLs: {}. Other URLs: {}",
                                     totalUrls.get(), imageCount.get(), otherCount.get());
@@ -515,20 +515,20 @@ public class ShopifyFileFetcherService {
         // Write the other URLs asynchronously.
         writeCsvAsync(OTHER_FILES_CSV, otherUrls, "other_file_urls");
 
-        return imageUrlMap;
+        return imageUrls;
     }
 
     /**
      * Processes a single CSV line by checking if it is a supported image URL.
      *
-     * @param line        the CSV cell value (URL).
-     * @param imageUrlMap map to store fileName to URL mapping.
-     * @param otherUrls   list to store URLs that are not supported images.
-     * @param totalUrls   counter for total processed URLs.
-     * @param imageCount  counter for supported image URLs.
-     * @param otherCount  counter for other URLs.
+     * @param line       the CSV cell value (URL).
+     * @param imageUrls  list to store  URLs.
+     * @param otherUrls  list to store URLs that are not supported images.
+     * @param totalUrls  counter for total processed URLs.
+     * @param imageCount counter for supported image URLs.
+     * @param otherCount counter for other URLs.
      */
-    private void processUrlLine(String line, Map<String, String> imageUrlMap, List<String> otherUrls,
+    private void processUrlLine(String line, List<String> imageUrls, List<String> otherUrls,
                                 AtomicInteger totalUrls, AtomicInteger imageCount, AtomicInteger otherCount) {
         totalUrls.incrementAndGet();
         String url = line.trim().replaceAll("^\"|\"$", "");
@@ -538,11 +538,8 @@ public class ShopifyFileFetcherService {
             otherUrls.add(url);
             otherCount.incrementAndGet();
         } else {
-            String fileName = extractFileNameFromUrl(url);
-            if (fileName != null) {
-                imageUrlMap.put(fileName, url);
-                imageCount.incrementAndGet();
-            }
+            imageUrls.add(url);
+            imageCount.incrementAndGet();
         }
     }
 
@@ -629,18 +626,20 @@ public class ShopifyFileFetcherService {
      * @param imageUrlMap map of image file names to URLs.
      * @return a list of missing URLs.
      */
-    public List<String> findMissingUrls(Set<String> fileNames, Map<String, String> imageUrlMap) {
+    public List<String> findMissingUrls(Set<String> fileNames, List<String> imageUrlMap) {
         logger.info("started comparing files");
         AtomicInteger comparisonCounter = new AtomicInteger(0);
         List<String> missingUrls = new ArrayList<>();
 
-        for (Map.Entry<String, String> entry : imageUrlMap.entrySet()) {
+        for (String imageUrl : imageUrlMap) {
             int count = comparisonCounter.incrementAndGet();
             if (count % 10000 == 0) {
                 logger.info("Processed {} comparisons so far.", count);
             }
-            if (!fileNames.contains(entry.getKey())) {
-                missingUrls.add(entry.getValue());
+
+            String fileName = extractFileNameFromUrl(imageUrl);
+            if (!fileNames.contains(fileName)) {
+                missingUrls.add(imageUrl);
             }
         }
         logger.info("file comparison completed");
