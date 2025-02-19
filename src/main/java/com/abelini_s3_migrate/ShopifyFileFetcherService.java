@@ -438,6 +438,7 @@ public class ShopifyFileFetcherService {
      */
     public List<String> createImageUrlMapAsync(String s3CsvPath) {
         logger.info("createImageUrlMapMultiThreaded started");
+
         // Use concurrent collections for thread safety.
         List<String> imageUrls = Collections.synchronizedList(new ArrayList<>());
         List<String> otherUrls = Collections.synchronizedList(new ArrayList<>());
@@ -446,7 +447,11 @@ public class ShopifyFileFetcherService {
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
 
+        // Fixed thread pool with 5 threads.
         ExecutorService executor = Executors.newFixedThreadPool(5);
+        // Semaphore to limit concurrent batches to 5.
+        Semaphore semaphore = new Semaphore(5);
+
         List<String[]> records = new ArrayList<>();
         try (CSVReader reader = new CSVReader(new FileReader(s3CsvPath))) {
             records = reader.readAll();
@@ -465,7 +470,7 @@ public class ShopifyFileFetcherService {
             }
         }
 
-        final int BATCH_SIZE = 50000;
+        final int BATCH_SIZE = 100000;
         int totalRecords = records.size() - startIndex;
         logger.info("Total records to process: {}", totalRecords);
 
@@ -474,25 +479,39 @@ public class ShopifyFileFetcherService {
 
         List<Future<?>> futures = new ArrayList<>();
 
-        // Process in batches of 100,000.
+        // Process in batches.
         for (int i = startIndex; i < records.size(); i += BATCH_SIZE) {
             int end = Math.min(records.size(), i + BATCH_SIZE);
             List<String[]> batch = records.subList(i, end);
             int currBatch = batchCounter.incrementAndGet();
             logger.info("Starting s3 url batch number {}: processing rows {} to {}", currBatch, i, end);
 
+            // Acquire a permit to ensure only 5 concurrent batches.
+            try {
+                semaphore.acquire();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.error("Batch processing interrupted", e);
+                break;
+            }
+
             Future<?> future = executor.submit(() -> {
-                for (String[] row : batch) {
-                    if (row.length > 0) {
-                        processUrlLine(row[0], imageUrls, otherUrls, totalUrls, imageCount, otherCount);
-                        if (totalUrls.get() % 100000 == 0) {
-                            logger.info("Processed {} URLs so far. Image URLs: {}. Other URLs: {}",
-                                    totalUrls.get(), imageCount.get(), otherCount.get());
+                try {
+                    for (String[] row : batch) {
+                        if (row.length > 0) {
+                            processUrlLine(row[0], imageUrls, otherUrls, totalUrls, imageCount, otherCount);
+                            if (totalUrls.get() % 100000 == 0) {
+                                logger.info("Processed {} URLs so far. Image URLs: {}. Other URLs: {}",
+                                        totalUrls.get(), imageCount.get(), otherCount.get());
+                            }
                         }
                     }
+                    int compCount = completeCounter.incrementAndGet();
+                    logger.info("Completed s3 url batch number {}. Total batches completed so far: {}", currBatch, compCount);
+                } finally {
+                    // Release the permit so the next batch can be processed.
+                    semaphore.release();
                 }
-                int compCount = completeCounter.incrementAndGet();
-                logger.info("Completed s3 url batch number {}. Total batches completed so far: {}", currBatch, compCount);
             });
             futures.add(future);
         }
@@ -555,13 +574,17 @@ public class ShopifyFileFetcherService {
     public Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException, CsvException {
         logger.info("readCsvToSet started");
 
-        // Use a synchronized Set for thread-safe additions.
         Set<String> fileNames = Collections.synchronizedSet(new HashSet<>());
         AtomicInteger totalUrls = new AtomicInteger(0);
         AtomicInteger batchCounter = new AtomicInteger(0);
         AtomicInteger completeCounter = new AtomicInteger(0);
-        ExecutorService executor = Executors.newFixedThreadPool(5);
-        // Read all rows using CSVReader
+
+        int BATCH_SIZE = 100000;
+        int MAX_CONCURRENT_BATCHES = 5;
+
+        ExecutorService executor = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
+        Semaphore semaphore = new Semaphore(MAX_CONCURRENT_BATCHES); // Controls batch execution
+
         List<String[]> records;
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
             records = reader.readAll();
@@ -573,13 +596,11 @@ public class ShopifyFileFetcherService {
             startIndex = 1;
         }
 
-        final int BATCH_SIZE = 50000;
         int totalRecords = records.size() - startIndex;
         logger.info("Total records to process: {}", totalRecords);
 
         List<Future<?>> futures = new ArrayList<>();
 
-        // Submit tasks for each batch of 100,000 rows.
         for (int i = startIndex; i < records.size(); i += BATCH_SIZE) {
             int end = Math.min(records.size(), i + BATCH_SIZE);
             List<String[]> batch = records.subList(i, end);
@@ -587,24 +608,37 @@ public class ShopifyFileFetcherService {
             int currBatch = batchCounter.incrementAndGet();
             logger.info("Starting filename batch number {}: processing rows {} to {}", currBatch, i, end);
 
+            try {
+                semaphore.acquire(); // Wait for an available slot before starting a new batch
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.error("Batch processing interrupted", e);
+                break;
+            }
+
             Future<?> future = executor.submit(() -> {
-                for (String[] row : batch) {
-                    if (row.length > 0) {
-                        String trimmedLine = row[0].trim().replaceAll("^\"|\"$", "");
-                        fileNames.add(trimmedLine);
-                        int count = totalUrls.incrementAndGet();
-                        if (count % 100000 == 0) {
-                            logger.info("Processed {} filenames so far.", count);
+                try {
+                    for (String[] row : batch) {
+                        if (row.length > 0) {
+                            String trimmedLine = row[0].trim().replaceAll("^\"|\"$", "");
+                            fileNames.add(trimmedLine);
+                            int count = totalUrls.incrementAndGet();
+                            if (count % 100000 == 0) {
+                                logger.info("Processed {} filenames so far.", count);
+                            }
                         }
                     }
+                    int compCount = completeCounter.incrementAndGet();
+                    logger.info("Completed filename batch number {}. Total batches completed so far: {}", currBatch, compCount);
+                } finally {
+                    semaphore.release(); // Release a slot for the next batch
                 }
-                int compCount = completeCounter.incrementAndGet();
-                logger.info("Completed filename batch number {}. Total batches completed so far: {}", currBatch, compCount);
             });
+
             futures.add(future);
         }
 
-        // Wait for all tasks to complete.
+        // Wait for all tasks to complete
         for (Future<?> future : futures) {
             try {
                 future.get();
@@ -612,6 +646,7 @@ public class ShopifyFileFetcherService {
                 logger.error("Error processing batch: ", e);
             }
         }
+
         executor.shutdown();
 
         logger.info("readCsvToSet ended");
