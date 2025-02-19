@@ -52,9 +52,10 @@ public class ShopifyFileFetcherService {
     private static final Logger LOGGER = Logger.getLogger(ShopifyFileFetcherService.class.getName());
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ShopifyFileFetcherService.class);
     private final RestTemplate restTemplate = new RestTemplate();
+    private final ThreadPoolTaskExecutor taskExecutor;
 
-    public ShopifyFileFetcherService() {
-        ThreadPoolTaskExecutor taskExecutor = new ThreadPoolTaskExecutor();
+    public ShopifyFileFetcherService(ThreadPoolTaskExecutor taskExecutor) {
+        this.taskExecutor = taskExecutor = new ThreadPoolTaskExecutor();
         taskExecutor.setCorePoolSize(10);
         taskExecutor.setMaxPoolSize(20);
         taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
@@ -436,47 +437,68 @@ public class ShopifyFileFetcherService {
      * @return A map where the key is the extracted file name and the value is the URL.
      */
     public Map<String, String> createImageUrlMapAsync(String s3CsvPath) {
-        logger.info("createImageUrlMapAsync started");
-        Map<String, String> imageUrlMap = new HashMap<>();
-        List<String> otherUrls = new ArrayList<>();
+        logger.info("createImageUrlMapMultiThreaded started");
+        // Use concurrent collections for thread safety.
+        Map<String, String> imageUrlMap = new ConcurrentHashMap<>();
+        List<String> otherUrls = Collections.synchronizedList(new ArrayList<>());
 
         AtomicInteger totalUrls = new AtomicInteger(0);
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
 
+        List<String[]> records = new ArrayList<>();
         try (CSVReader reader = new CSVReader(new FileReader(s3CsvPath))) {
-            // Read all rows from the CSV file.
-            List<String[]> records = reader.readAll();
+            records = reader.readAll();
+        } catch (IOException | CsvException e) {
+            logger.error("Error reading S3 CSV file: ", e);
+            return imageUrlMap;
+        }
 
-            if (!records.isEmpty()) {
-                // Process the first row as header check.
-                String[] firstRow = records.get(0);
-                if (firstRow.length > 0 && looksLikeHeader(firstRow[0])) {
-                    logger.info("Skipping header in S3 CSV: {}", firstRow[0]);
-                } else if (firstRow.length > 0) {
-                    // Process the first row if it doesn't look like a header.
-                    processUrlLine(firstRow[0], imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
-                }
+        // Determine if the first row is a header.
+        int startIndex = 0;
+        if (!records.isEmpty()) {
+            String[] firstRow = records.get(0);
+            if (firstRow.length > 0 && looksLikeHeader(firstRow[0])) {
+                logger.info("Skipping header in S3 CSV: {}", firstRow[0]);
+                startIndex = 1;
+            }
+        }
 
-                // Determine the starting index:
-                int startIndex = (firstRow.length > 0 && looksLikeHeader(firstRow[0])) ? 1 : 1;
+        final int BATCH_SIZE = 100000;
+        int totalRecords = records.size() - startIndex;
+        logger.info("Total records to process: {}", totalRecords);
 
-                // Process remaining rows sequentially.
-                for (int i = startIndex; i < records.size(); i++) {
-                    String[] row = records.get(i);
+        List<Future<?>> futures = new ArrayList<>();
+
+        // Process in batches of 100,000.
+        for (int i = startIndex; i < records.size(); i += BATCH_SIZE) {
+            int end = Math.min(records.size(), i + BATCH_SIZE);
+            List<String[]> batch = records.subList(i, end);
+            Future<?> future = taskExecutor.submit(() -> {
+                for (String[] row : batch) {
                     if (row.length > 0) {
                         processUrlLine(row[0], imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
                         if (totalUrls.get() % 100000 == 0) {
-                            logger.info("Processed {} URLs so far. with image urls {} and other urls {}", totalUrls.get(), imageCount.get(), otherCount.get());
+                            logger.info("Processed {} URLs so far. Image URLs: {}. Other URLs: {}",
+                                    totalUrls.get(), imageCount.get(), otherCount.get());
                         }
                     }
                 }
-            }
-            logger.info("createImageUrlMapAsync ended");
-        } catch (IOException | CsvException e) {
-            logger.error("Error reading S3 CSV file: ", e);
+            });
+            futures.add(future);
         }
 
+        // Wait for all tasks to complete.
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                logger.error("Error processing batch: ", e);
+            }
+        }
+        taskExecutor.shutdown();
+
+        logger.info("createImageUrlAsync ended");
         logger.info("Total S3 URLs processed: {}. Image URLs: {}. Other URLs: {}.",
                 totalUrls.get(), imageCount.get(), otherCount.get());
 
@@ -520,35 +542,63 @@ public class ShopifyFileFetcherService {
      * @param filePath   the CSV file path.
      * @param skipHeader true to skip the first header row.
      * @return a set of trimmed lines from the first column of each row.
-     * @throws IOException   if an I/O error occurs.
-     * @throws CsvException  if a CSV parsing error occurs.
+     * @throws IOException  if an I/O error occurs.
+     * @throws CsvException if a CSV parsing error occurs.
      */
     public Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException, CsvException {
         logger.info("readCsvToSet started");
-        Set<String> fileNames = new HashSet<>();
+
+        // Use a synchronized Set for thread-safe additions.
+        Set<String> fileNames = Collections.synchronizedSet(new HashSet<>());
         AtomicInteger totalUrls = new AtomicInteger(0);
 
+        // Read all rows using CSVReader
+        List<String[]> records;
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
-            List<String[]> records = reader.readAll();
-            int startIndex = 0;
+            records = reader.readAll();
+        }
 
-            if (skipHeader && !records.isEmpty()) {
-                logger.info("Skipping header in file {}: {}", filePath, records.get(0)[0]);
-                startIndex = 1;
-            }
+        int startIndex = 0;
+        if (skipHeader && !records.isEmpty()) {
+            logger.info("Skipping header in file {}: {}", filePath, records.get(0)[0]);
+            startIndex = 1;
+        }
 
-            for (int i = startIndex; i < records.size(); i++) {
-                String[] row = records.get(i);
-                if (row.length > 0) {
-                    String trimmedLine = row[0].trim().replaceAll("^\"|\"$", "");
-                    fileNames.add(trimmedLine);
-                    totalUrls.incrementAndGet();
-                    if (totalUrls.get() % 100000 == 0) {
-                        logger.info("Processed {} filenames so far.", totalUrls.get());
+        final int BATCH_SIZE = 100000;
+        int totalRecords = records.size() - startIndex;
+        logger.info("Total records to process: {}", totalRecords);
+
+        List<Future<?>> futures = new ArrayList<>();
+
+        // Submit tasks for each batch of 100,000 rows.
+        for (int i = startIndex; i < records.size(); i += BATCH_SIZE) {
+            int end = Math.min(records.size(), i + BATCH_SIZE);
+            List<String[]> batch = records.subList(i, end);
+            Future<?> future = taskExecutor.submit(() -> {
+                for (String[] row : batch) {
+                    if (row.length > 0) {
+                        String trimmedLine = row[0].trim().replaceAll("^\"|\"$", "");
+                        fileNames.add(trimmedLine);
+                        int count = totalUrls.incrementAndGet();
+                        if (count % 100000 == 0) {
+                            logger.info("Processed {} filenames so far.", count);
+                        }
                     }
                 }
+            });
+            futures.add(future);
+        }
+
+        // Wait for all tasks to complete.
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                logger.error("Error processing batch: ", e);
             }
         }
+        taskExecutor.shutdown();
+
         logger.info("readCsvToSet ended");
         logger.info("Finished reading file names from {}. Count: {}", filePath, fileNames.size());
         return fileNames;
