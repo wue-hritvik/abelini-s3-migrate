@@ -446,6 +446,7 @@ public class ShopifyFileFetcherService {
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
 
+        ExecutorService executor = Executors.newFixedThreadPool(5);
         List<String[]> records = new ArrayList<>();
         try (CSVReader reader = new CSVReader(new FileReader(s3CsvPath))) {
             records = reader.readAll();
@@ -469,6 +470,8 @@ public class ShopifyFileFetcherService {
         logger.info("Total records to process: {}", totalRecords);
 
         AtomicInteger batchCounter = new AtomicInteger(0);
+        AtomicInteger completeCounter = new AtomicInteger(0);
+
         List<Future<?>> futures = new ArrayList<>();
 
         // Process in batches of 100,000.
@@ -478,7 +481,7 @@ public class ShopifyFileFetcherService {
             int currBatch = batchCounter.incrementAndGet();
             logger.info("Starting s3 url batch number {}: processing rows {} to {}", currBatch, i, end);
 
-            Future<?> future = taskExecutor.submit(() -> {
+            Future<?> future = executor.submit(() -> {
                 for (String[] row : batch) {
                     if (row.length > 0) {
                         processUrlLine(row[0], imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
@@ -488,7 +491,8 @@ public class ShopifyFileFetcherService {
                         }
                     }
                 }
-                logger.info("Completed batch number {}. Total batches completed so far: {}", currBatch, batchCounter.get());
+                int compCount = completeCounter.incrementAndGet();
+                logger.info("Completed s3 url batch number {}. Total batches completed so far: {}", currBatch, compCount);
             });
             futures.add(future);
         }
@@ -501,7 +505,8 @@ public class ShopifyFileFetcherService {
                 logger.error("Error processing batch: ", e);
             }
         }
-        taskExecutor.shutdown();
+        executor.shutdown();
+        records.clear();
 
         logger.info("createImageUrlAsync ended");
         logger.info("Total S3 URLs processed: {}. Image URLs: {}. Other URLs: {}.",
@@ -557,7 +562,8 @@ public class ShopifyFileFetcherService {
         Set<String> fileNames = Collections.synchronizedSet(new HashSet<>());
         AtomicInteger totalUrls = new AtomicInteger(0);
         AtomicInteger batchCounter = new AtomicInteger(0);
-
+        AtomicInteger completeCounter = new AtomicInteger(0);
+        ExecutorService executor = Executors.newFixedThreadPool(5);
         // Read all rows using CSVReader
         List<String[]> records;
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
@@ -584,7 +590,7 @@ public class ShopifyFileFetcherService {
             int currBatch = batchCounter.incrementAndGet();
             logger.info("Starting filename batch number {}: processing rows {} to {}", currBatch, i, end);
 
-            Future<?> future = taskExecutor.submit(() -> {
+            Future<?> future = executor.submit(() -> {
                 for (String[] row : batch) {
                     if (row.length > 0) {
                         String trimmedLine = row[0].trim().replaceAll("^\"|\"$", "");
@@ -595,7 +601,8 @@ public class ShopifyFileFetcherService {
                         }
                     }
                 }
-                logger.info("Completed batch number {}. Total batches completed so far: {}", currBatch, batchCounter.get());
+                int compCount = completeCounter.incrementAndGet();
+                logger.info("Completed filename batch number {}. Total batches completed so far: {}", currBatch, compCount);
             });
             futures.add(future);
         }
@@ -608,7 +615,7 @@ public class ShopifyFileFetcherService {
                 logger.error("Error processing batch: ", e);
             }
         }
-        taskExecutor.shutdown();
+        executor.shutdown();
 
         logger.info("readCsvToSet ended");
         logger.info("Finished reading file names from {}. Count: {}", filePath, fileNames.size());
@@ -655,6 +662,7 @@ public class ShopifyFileFetcherService {
         logger.info("started writing csv to async filename ::{}", fileName);
         CompletableFuture.runAsync(() -> {
             try {
+                AtomicInteger atomicInteger = new AtomicInteger(0);
                 Path filePath = Paths.get(fileName);
                 // Ensure the parent directory exists.
                 if (filePath.getParent() != null) {
@@ -683,9 +691,14 @@ public class ShopifyFileFetcherService {
                     }
                     for (String line : data) {
                         writer.writeNext(new String[]{line});
+                        int processed = atomicInteger.incrementAndGet();
+                        if (processed % 10000 == 0) {
+                            logger.info("Processed url in csv {} records so far.", processed);
+                        }
                     }
                 }
                 logger.info("Finished writing file: {} with {} records.", fileName, data.size());
+                data.clear();
             } catch (IOException e) {
                 logger.error("Error writing CSV file: " + fileName, e);
             }
