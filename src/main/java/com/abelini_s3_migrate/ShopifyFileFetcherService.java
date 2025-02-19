@@ -2,6 +2,7 @@ package com.abelini_s3_migrate;
 
 import com.opencsv.CSVReader;
 import com.opencsv.CSVWriter;
+import com.opencsv.exceptions.CsvException;
 import com.opencsv.exceptions.CsvValidationException;
 import org.apache.tika.Tika;
 import org.json.JSONArray;
@@ -413,7 +414,6 @@ public class ShopifyFileFetcherService {
 
             // Read file names from the CSV (skipping header) into a Set for fast lookups.
             Set<String> fileNames = readCsvToSet(BULK_CSV_PATH, true);
-            logger.info("Total file names processed: {}", fileNames.size());
 
             // Compare file names and get list of missing image URLs.
             List<String> missingUrls = findMissingUrls(fileNames, imageUrlMapTask);
@@ -429,6 +429,12 @@ public class ShopifyFileFetcherService {
         return CompletableFuture.completedFuture(null);
     }
 
+    /**
+     * Creates an image URL map asynchronously by parsing the CSV file using CSVReader.readAll().
+     *
+     * @param s3CsvPath Path to the CSV file.
+     * @return A map where the key is the extracted file name and the value is the URL.
+     */
     public Map<String, String> createImageUrlMapAsync(String s3CsvPath) {
         logger.info("createImageUrlMapAsync started");
         Map<String, String> imageUrlMap = new HashMap<>();
@@ -438,27 +444,36 @@ public class ShopifyFileFetcherService {
         AtomicInteger imageCount = new AtomicInteger(0);
         AtomicInteger otherCount = new AtomicInteger(0);
 
-        try {
-            // Read all lines from the CSV file
-            List<String> lines = Files.readAllLines(Paths.get(s3CsvPath));
+        try (CSVReader reader = new CSVReader(new FileReader(s3CsvPath))) {
+            // Read all rows from the CSV file.
+            List<String[]> records = reader.readAll();
 
-            if (!lines.isEmpty()) {
-                // Process the first line (header check)
-                String firstLine = lines.get(0);
-                if (looksLikeHeader(firstLine)) {
-                    logger.info("Skipping header in S3 CSV: {}", firstLine);
-                } else {
-                    // Process the first line if it doesn't look like a header.
-                    processUrlLine(firstLine, imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+            if (!records.isEmpty()) {
+                // Process the first row as header check.
+                String[] firstRow = records.get(0);
+                if (firstRow.length > 0 && looksLikeHeader(firstRow[0])) {
+                    logger.info("Skipping header in S3 CSV: {}", firstRow[0]);
+                } else if (firstRow.length > 0) {
+                    // Process the first row if it doesn't look like a header.
+                    processUrlLine(firstRow[0], imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
                 }
 
-                // Process remaining lines sequentially (starting from index 1 if header was skipped)
-                for (int i = 1; i < lines.size(); i++) {
-                    processUrlLine(lines.get(i), imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+                // Determine the starting index:
+                int startIndex = (firstRow.length > 0 && looksLikeHeader(firstRow[0])) ? 1 : 1;
+
+                // Process remaining rows sequentially.
+                for (int i = startIndex; i < records.size(); i++) {
+                    String[] row = records.get(i);
+                    if (row.length > 0) {
+                        processUrlLine(row[0], imageUrlMap, otherUrls, totalUrls, imageCount, otherCount);
+                        if (totalUrls.get() % 100000 == 0) {
+                            logger.info("Processed {} URLs so far. with image urls {} and other urls {}", totalUrls.get(), imageCount.get(), otherCount.get());
+                        }
+                    }
                 }
             }
             logger.info("createImageUrlMapAsync ended");
-        } catch (IOException e) {
+        } catch (IOException | CsvException e) {
             logger.error("Error reading S3 CSV file: ", e);
         }
 
@@ -474,7 +489,7 @@ public class ShopifyFileFetcherService {
     /**
      * Processes a single CSV line by checking if it is a supported image URL.
      *
-     * @param line        the CSV line.
+     * @param line        the CSV cell value (URL).
      * @param imageUrlMap map to store fileName to URL mapping.
      * @param otherUrls   list to store URLs that are not supported images.
      * @param totalUrls   counter for total processed URLs.
@@ -486,7 +501,7 @@ public class ShopifyFileFetcherService {
         totalUrls.incrementAndGet();
         String url = line.trim().replaceAll("^\"|\"$", "");
 
-        // Check using Tika MIME detection.
+        // Check using Tika MIME detection or your own logic.
         if (!isSupportedImage(url)) {
             otherUrls.add(url);
             otherCount.incrementAndGet();
@@ -503,28 +518,37 @@ public class ShopifyFileFetcherService {
      * Reads a CSV file (optionally skipping the header) and returns a Set of trimmed lines.
      *
      * @param filePath   the CSV file path.
-     * @param skipHeader true to skip the first header line.
-     * @return a set of lines.
-     * @throws IOException if an I/O error occurs.
+     * @param skipHeader true to skip the first header row.
+     * @return a set of trimmed lines from the first column of each row.
+     * @throws IOException   if an I/O error occurs.
+     * @throws CsvException  if a CSV parsing error occurs.
      */
-    public Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException {
+    public Set<String> readCsvToSet(String filePath, boolean skipHeader) throws IOException, CsvException {
         logger.info("readCsvToSet started");
         Set<String> fileNames = new HashSet<>();
+        AtomicInteger totalUrls = new AtomicInteger(0);
 
-        // Read all lines from the CSV file
-        List<String> lines = Files.readAllLines(Paths.get(filePath));
-        int startIndex = 0;
+        try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
+            List<String[]> records = reader.readAll();
+            int startIndex = 0;
 
-        if (skipHeader && !lines.isEmpty()) {
-            logger.info("Skipping header in file {}: {}", filePath, lines.get(0));
-            startIndex = 1;
+            if (skipHeader && !records.isEmpty()) {
+                logger.info("Skipping header in file {}: {}", filePath, records.get(0)[0]);
+                startIndex = 1;
+            }
+
+            for (int i = startIndex; i < records.size(); i++) {
+                String[] row = records.get(i);
+                if (row.length > 0) {
+                    String trimmedLine = row[0].trim().replaceAll("^\"|\"$", "");
+                    fileNames.add(trimmedLine);
+                    totalUrls.incrementAndGet();
+                    if (totalUrls.get() % 100000 == 0) {
+                        logger.info("Processed {} filenames so far.", totalUrls.get());
+                    }
+                }
+            }
         }
-
-        for (int i = startIndex; i < lines.size(); i++) {
-            String trimmedLine = lines.get(i).trim().replaceAll("^\"|\"$", "");
-            fileNames.add(trimmedLine);
-        }
-
         logger.info("readCsvToSet ended");
         logger.info("Finished reading file names from {}. Count: {}", filePath, fileNames.size());
         return fileNames;
