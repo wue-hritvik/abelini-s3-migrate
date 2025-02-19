@@ -468,12 +468,16 @@ public class ShopifyFileFetcherService {
         int totalRecords = records.size() - startIndex;
         logger.info("Total records to process: {}", totalRecords);
 
+        AtomicInteger batchCounter = new AtomicInteger(0);
         List<Future<?>> futures = new ArrayList<>();
 
         // Process in batches of 100,000.
         for (int i = startIndex; i < records.size(); i += BATCH_SIZE) {
             int end = Math.min(records.size(), i + BATCH_SIZE);
             List<String[]> batch = records.subList(i, end);
+            int currBatch = batchCounter.incrementAndGet();
+            logger.info("Starting s3 url batch number {}: processing rows {} to {}", currBatch, i, end);
+
             Future<?> future = taskExecutor.submit(() -> {
                 for (String[] row : batch) {
                     if (row.length > 0) {
@@ -484,6 +488,7 @@ public class ShopifyFileFetcherService {
                         }
                     }
                 }
+                logger.info("Completed batch number {}. Total batches completed so far: {}", currBatch, batchCounter.get());
             });
             futures.add(future);
         }
@@ -551,6 +556,7 @@ public class ShopifyFileFetcherService {
         // Use a synchronized Set for thread-safe additions.
         Set<String> fileNames = Collections.synchronizedSet(new HashSet<>());
         AtomicInteger totalUrls = new AtomicInteger(0);
+        AtomicInteger batchCounter = new AtomicInteger(0);
 
         // Read all rows using CSVReader
         List<String[]> records;
@@ -574,6 +580,10 @@ public class ShopifyFileFetcherService {
         for (int i = startIndex; i < records.size(); i += BATCH_SIZE) {
             int end = Math.min(records.size(), i + BATCH_SIZE);
             List<String[]> batch = records.subList(i, end);
+
+            int currBatch = batchCounter.incrementAndGet();
+            logger.info("Starting filename batch number {}: processing rows {} to {}", currBatch, i, end);
+
             Future<?> future = taskExecutor.submit(() -> {
                 for (String[] row : batch) {
                     if (row.length > 0) {
@@ -585,6 +595,7 @@ public class ShopifyFileFetcherService {
                         }
                     }
                 }
+                logger.info("Completed batch number {}. Total batches completed so far: {}", currBatch, batchCounter.get());
             });
             futures.add(future);
         }
