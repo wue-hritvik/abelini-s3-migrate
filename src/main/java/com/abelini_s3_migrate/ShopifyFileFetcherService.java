@@ -437,7 +437,7 @@ public class ShopifyFileFetcherService {
         logger.info("createImageUrlMapMultiThreaded started");
 
         // Use concurrent collections for thread safety.
-        List<String> imageUrls = Collections.synchronizedList(new ArrayList<>());
+//        List<String> imageUrls = Collections.synchronizedList(new ArrayList<>());
         List<String> missingUrls = Collections.synchronizedList(new ArrayList<>());
 
         AtomicInteger totalUrls = new AtomicInteger(0);
@@ -455,7 +455,7 @@ public class ShopifyFileFetcherService {
             records = reader.readAll();
         } catch (IOException | CsvException e) {
             logger.error("Error reading S3 CSV file: ", e);
-            return imageUrls;
+            return missingUrls;
         }
 
         // Determine if the first row is a header.
@@ -499,7 +499,6 @@ public class ShopifyFileFetcherService {
                         if (row.length > 0) {
                             processUrlLine(
                                     row[0],
-                                    imageUrls,
                                     totalUrls,
                                     imageCount,
                                     otherCount,
@@ -541,23 +540,22 @@ public class ShopifyFileFetcherService {
                 totalUrls.get(), imageCount.get(), otherCount.get(), missingCounter.get());
 
         // Write the image URLs asynchronously.
-        writeCsvAsync(IMAGE_FILES_CSV, imageUrls, "image_urls");
+//        writeCsvAsync(IMAGE_FILES_CSV, imageUrls, "image_urls");
 
-        return imageUrls;
+        return missingUrls;
     }
 
     /**
      * Processes a single CSV line by checking if it is a supported image URL.
      *
      * @param line           the CSV cell value (URL).
-     * @param imageUrls      list to store  URLs.
      * @param totalUrls      counter for total processed URLs.
      * @param imageCount     counter for supported image URLs.
      * @param otherCount     counter for other URLs.
      * @param fileNames
      * @param missingCounter
      */
-    private void processUrlLine(String line, List<String> imageUrls,
+    private void processUrlLine(String line,
                                 AtomicInteger totalUrls, AtomicInteger imageCount, AtomicInteger otherCount, List<String> missingUrls, Set<String> fileNames, AtomicInteger missingCounter) {
         totalUrls.incrementAndGet();
         String url = line.trim().replaceAll("^\"|\"$", "");
@@ -566,7 +564,6 @@ public class ShopifyFileFetcherService {
         if (!isSupportedImage(url)) {
             otherCount.incrementAndGet();
         } else {
-            imageUrls.add(url);
             String fileName = extractFileNameFromUrl(url);
             if (!fileNames.contains(fileName)) {
                 missingUrls.add(url);
