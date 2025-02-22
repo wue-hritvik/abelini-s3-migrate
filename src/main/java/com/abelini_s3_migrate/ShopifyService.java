@@ -63,13 +63,14 @@ public class ShopifyService {
     public void uploadImagesToShopify(String csvFilePath) throws IOException, CsvException {
         logger.info("Starting bulk upload to Shopify...");
         List<String> imageUrls = readCSV(csvFilePath);
+        logger.info("total urls count ::: {}", imageUrls.size());
         int batchSize = 100; // Send 100 files per batch
-        ExecutorService executor = Executors.newFixedThreadPool(5); // Parallel execution
+        ExecutorService executor = Executors.newFixedThreadPool(15); // Parallel execution
 
         AtomicInteger activeBatches = new AtomicInteger(0);  // Track running batches
         AtomicInteger completedBatches = new AtomicInteger(0); // Track completed batches
 
-        int remainingCost = 2000; // Start with max available cost
+        int remainingCost = 20000; // Start with max available cost
 
         for (int i = 0; i < imageUrls.size(); i += batchSize) {
             List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
@@ -85,8 +86,6 @@ public class ShopifyService {
                     logger.info("Batch {} completed. Total completed: {}", batchNumber, completedBatches.get());
                 } catch (Exception e) {
                     logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-                } finally {
-                    activeBatches.decrementAndGet();
                 }
             });
 
@@ -98,8 +97,8 @@ public class ShopifyService {
                 logger.warn("Approaching API rate limit, sleeping for 2 seconds...");
                 try {
                     Thread.sleep(2000);
-                    remainingCost += 200; // Restore 100 points per second
-                    if (remainingCost > 2000) remainingCost = 2000; // Cap at 2000
+                    remainingCost += 2000; // Restore 1000 points per second
+                    if (remainingCost > 20000) remainingCost = 20000; // Cap at 20000
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -168,7 +167,8 @@ public class ShopifyService {
     }
 
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+//            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+            "image/avif", "video/mp4"
     );
 
     private boolean notSupportedFileType(String fileUrl) {
@@ -227,10 +227,10 @@ public class ShopifyService {
     }
 
     private String detectShopifyContentType(String fileUrl) {
-        String mimeType = detectMimeType(fileUrl);
-        if ("application/pdf".equals(mimeType)) return "FILE";
-        if (mimeType.startsWith("image/")) return "IMAGE";
-        if (mimeType.startsWith("video/")) return "VIDEO";
+//        String mimeType = detectMimeType(fileUrl);
+//        if ("application/pdf".equals(mimeType)) return "FILE";
+//        if (mimeType.startsWith("image/")) return "IMAGE";
+//        if (mimeType.startsWith("video/")) return "VIDEO";
 
         return "FILE";
     }
