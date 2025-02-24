@@ -65,10 +65,11 @@ public class ShopifyService {
         List<String> imageUrls = readCSV(csvFilePath);
         logger.info("total urls count ::: {}", imageUrls.size());
         int batchSize = 100; // Send 100 files per batch
-        ExecutorService executor = Executors.newFixedThreadPool(15); // Parallel execution
+        ExecutorService executor = Executors.newFixedThreadPool(100); // Parallel execution
 
         AtomicInteger activeBatches = new AtomicInteger(0);  // Track running batches
         AtomicInteger completedBatches = new AtomicInteger(0); // Track completed batches
+        AtomicInteger totalUploads = new AtomicInteger(0);
 
         int remainingCost = 20000; // Start with max available cost
 
@@ -81,7 +82,7 @@ public class ShopifyService {
             logger.info("Starting batch {} with {} images: {}", batchNumber, batch.size(), batch);
             executor.submit(() -> {
                 try {
-                    registerBatchInShopify(batch);
+                    registerBatchInShopify(batch,totalUploads);
                     completedBatches.incrementAndGet(); // Increment completed batch count
                     logger.info("Batch {} completed. Total completed: {}", batchNumber, completedBatches.get());
                 } catch (Exception e) {
@@ -112,10 +113,10 @@ public class ShopifyService {
             Thread.currentThread().interrupt();
         }
 
-        logger.info("Bulk upload completed. Total batches completed: {}", completedBatches.get());
+        logger.info("Bulk upload completed. Total batches completed: {}, total uploads: {}", completedBatches.get(), totalUploads.get());
     }
 
-    public void registerBatchInShopify(List<String> fileUrls) {
+    public void registerBatchInShopify(List<String> fileUrls, AtomicInteger totalUploads) {
         List<Map<String, String>> filesList = new ArrayList<>();
         for (String fileUrl : fileUrls) {
             String encodedUrl = encodeUrl(fileUrl);
@@ -129,6 +130,7 @@ public class ShopifyService {
             fileEntry.put("alt", fileName);
             fileEntry.put("contentType", contentType);
             filesList.add(fileEntry);
+            totalUploads.incrementAndGet();
         }
         String query = """
                 mutation fileCreate($files: [FileCreateInput!]!) {

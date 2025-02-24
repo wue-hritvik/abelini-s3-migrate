@@ -17,6 +17,7 @@ import java.io.ByteArrayInputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 @RestController
@@ -47,7 +48,7 @@ public class StagingController {
     public ResponseEntity<String> uploadFileFromS3(@RequestParam String s3Url) {
         try {
             String customFileName = generateShopifyFilePath(s3Url);
-
+            AtomicInteger totalUploads = new AtomicInteger(0);
             // ✅ 1️⃣ Download File from S3
             byte[] fileBytes = downloadFile(s3Url);
             String mimeType = detectMimeType(fileBytes);
@@ -74,7 +75,7 @@ public class StagingController {
             List<String> urls = new ArrayList<>();
             urls.add(resourceUrl);
             // ✅ 6️⃣ Register the File in Shopify
-            shopifyService.registerBatchInShopify(urls);
+            shopifyService.registerBatchInShopify(urls, totalUploads);
 
             return ResponseEntity.ok("File uploaded successfully: " + finalFileName);
         } catch (Exception e) {
