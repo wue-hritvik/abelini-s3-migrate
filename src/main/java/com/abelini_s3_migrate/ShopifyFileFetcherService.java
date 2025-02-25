@@ -37,7 +37,7 @@ public class ShopifyFileFetcherService {
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
     private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename.csv";
-    private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk.csv";
+    private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_avif_mp4";
     private static final int API_COST_PER_CALL = 35;
     private static final int MAX_POINTS = 2000;
     private static final int RECOVERY_RATE = 100;
@@ -194,7 +194,7 @@ public class ShopifyFileFetcherService {
         String mutation = """
                 mutation {
                   bulkOperationRunQuery(
-                    query: "{ files(query: \\"created_at:>=2025-02-16\\") { edges { node { preview { image { altText } } } } } }"
+                    query: "{ files(query: \\"created_at:>=2025-02-24\\") { edges { node { preview { image { altText } } } } } }"
                   ) {
                     bulkOperation {
                       id
@@ -389,15 +389,16 @@ public class ShopifyFileFetcherService {
         }
     }
 
-    private static final String S3_CSV_PATH = "src/main/resources/s3file/abelini_s3_urls.csv";
-    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_bulk.csv";
-    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_image_urls.csv";
+    private static final String S3_CSV_PATH = "src/main/resources/s3file/avif_mp4_run_24_02_25.csv";
+    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_bulk_avif_mp4.csv";
+    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_avif_mp4.csv";
     private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
     private static final String IMAGE_FILES_CSV = "src/main/resources/s3file/image_s3_urls.csv";
 
     // Supported MIME types for images.
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+//            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+            "image/avif", "video/mp4"
     );
 
     private final Tika tika = new Tika();
@@ -791,8 +792,11 @@ public class ShopifyFileFetcherService {
     public boolean isSupportedImage(String fileUrl) {
         String lowerUrl = fileUrl.toLowerCase();
         // Quick check based on file extension.
-        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
-                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
+//        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
+//                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
+//            return true;
+//        }
+        if (lowerUrl.endsWith(".avif") || lowerUrl.endsWith(".mp4")){
             return true;
         }
         // Fallback: detect MIME type.
