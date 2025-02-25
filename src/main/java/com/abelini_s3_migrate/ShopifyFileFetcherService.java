@@ -64,7 +64,7 @@ public class ShopifyFileFetcherService {
 
         List<String[]> fileData = new ArrayList<>();
         String cursor = null;
-        boolean hasNextPage;
+        boolean hasNextPage = false;
 
         // Prepare file and add header only if file is new or empty
         fileData.add(new String[]{"filename"});
@@ -100,6 +100,13 @@ public class ShopifyFileFetcherService {
 
             try {
                 JSONObject response = executeGraphQLQuery(query);
+                logger.info("shopify api response ::: {}", response);
+                
+                if (!response.has("data") || response.isNull("data")) {
+                    LOGGER.severe("Shopify response data is null. Retrying...");
+                    continue;
+                }
+
                 JSONObject filesObject = response.getJSONObject("data").getJSONObject("files");
                 JSONArray edges = filesObject.getJSONArray("edges");
                 hasNextPage = filesObject.getJSONObject("pageInfo").getBoolean("hasNextPage");
@@ -129,7 +136,7 @@ public class ShopifyFileFetcherService {
                 }
             } catch (Exception e) {
                 LOGGER.severe("Error fetching batch " + currentBatchNumber + ": " + e.getMessage());
-                break;
+              continue;
             }
 
             LOGGER.info("Batch " + currentBatchNumber + " completed.");
