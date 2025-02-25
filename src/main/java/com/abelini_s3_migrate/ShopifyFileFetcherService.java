@@ -36,7 +36,7 @@ public class ShopifyFileFetcherService {
     @Value("${shopify_access_token}")
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
-    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename.csv";
+    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_avif_mp4.csv";
     private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_avif_mp4_1.csv";
     private static final int API_COST_PER_CALL = 35;
     private static final int MAX_POINTS = 2000;
@@ -80,7 +80,7 @@ public class ShopifyFileFetcherService {
 
             String query = """
                     {
-                        files(first: 250, sortKey: CREATED_AT, query: "created_at:>=2025-02-16"%s) {
+                        files(first: 250, sortKey: CREATED_AT, query: "created_at:>=2025-02-24"%s) {
                             edges {
                                 node {
                                     preview {
@@ -112,8 +112,10 @@ public class ShopifyFileFetcherService {
                             .getJSONObject("preview")
                             .getJSONObject("image")
                             .optString("altText", "");
-                    fileData.add(new String[]{altText});
-                    totalFilesStored.incrementAndGet();  // Thread-safe increment
+                    if (!altText.isBlank()) {
+                        fileData.add(new String[]{altText});
+                        totalFilesStored.incrementAndGet();  // Thread-safe increment
+                    }
                 }
 
                 LOGGER.info("Total files stored so far: " + totalFilesStored.get());
@@ -266,7 +268,7 @@ public class ShopifyFileFetcherService {
 
         while (true) {  // Infinite loop, will break when operation completes or fails
             try {
-                TimeUnit.SECONDS.sleep(10);  // Wait for 10 seconds before polling again
+                TimeUnit.SECONDS.sleep(20);  // Wait for 20 seconds before polling again
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 LOGGER.severe("Polling interrupted: " + e.getMessage());
@@ -293,6 +295,7 @@ public class ShopifyFileFetcherService {
                     return bulkOperation;  // Return the completed bulk operation
                 } else if ("FAILED".equals(status)) {
                     LOGGER.severe("Bulk operation failed with error: " + bulkOperation.optString("errorCode"));
+                    LOGGER.severe("Bulk operation failed with error " + bulkOperation);
                     return null;  // Return null in case of failure
                 }
             }
@@ -796,7 +799,7 @@ public class ShopifyFileFetcherService {
 //                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
 //            return true;
 //        }
-        if (lowerUrl.endsWith(".avif") || lowerUrl.endsWith(".mp4")){
+        if (lowerUrl.endsWith(".avif") || lowerUrl.endsWith(".mp4")) {
             return true;
         }
         // Fallback: detect MIME type.
