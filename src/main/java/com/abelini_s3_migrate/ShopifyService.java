@@ -62,61 +62,45 @@ public class ShopifyService {
     @Async
     public void uploadImagesToShopify(String csvFilePath) throws IOException, CsvException {
         logger.info("Starting bulk upload to Shopify...");
+
         List<String> imageUrls = readCSV(csvFilePath);
-        logger.info("total urls count ::: {}", imageUrls.size());
-        int batchSize = 100; // Send 100 files per batch
-        ExecutorService executor = Executors.newFixedThreadPool(20); // Parallel execution
+        logger.info("Total URLs count: {}", imageUrls.size());
 
-        AtomicInteger activeBatches = new AtomicInteger(0);  // Track running batches
-        AtomicInteger completedBatches = new AtomicInteger(0); // Track completed batches
-        AtomicInteger totalUploads = new AtomicInteger(0);
-
-        int remainingCost = 20000; // Start with max available cost
+        int batchSize = 50; // Batch size of 50
+        int totalBatches = (int) Math.ceil((double) imageUrls.size() / batchSize);
+        int totalProcessed = 0;
 
         for (int i = 0; i < imageUrls.size(); i += batchSize) {
             List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
+            int batchNumber = (i / batchSize) + 1;
 
-            activeBatches.incrementAndGet(); // Increment active batch count
-            int batchNumber = activeBatches.get();
+            logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
 
-            logger.info("Starting batch {} with {} images: {}", batchNumber, batch.size(), batch);
-            executor.submit(() -> {
+            try {
+                registerBatchInShopify(batch, totalProcessed);
+                totalProcessed += batch.size();
+
+                logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, totalProcessed, imageUrls.size());
+            } catch (Exception e) {
+                logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+            }
+
+            // Wait for 1 second before processing the next batch
+            if (i + batchSize < imageUrls.size()) {
+                logger.info("Waiting for 1 second before next batch...");
                 try {
-                    registerBatchInShopify(batch,totalUploads);
-                    completedBatches.incrementAndGet(); // Increment completed batch count
-                    logger.info("Batch {} completed. Total completed: {}", batchNumber, completedBatches.get());
-                } catch (Exception e) {
-                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-                }
-            });
-
-            // Reduce available cost
-            remainingCost -= 20;
-
-            // If approaching the limit, wait for restore
-            if (remainingCost < 200) {
-                logger.warn("Approaching API rate limit, sleeping for 2 seconds...");
-                try {
-                    Thread.sleep(2000);
-                    remainingCost += 2000; // Restore 1000 points per second
-                    if (remainingCost > 20000) remainingCost = 20000; // Cap at 20000
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
             }
         }
 
-        executor.shutdown();
-        try {
-            executor.awaitTermination(1, TimeUnit.HOURS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
-
-        logger.info("Bulk upload completed. Total batches completed: {}, total uploads: {}", completedBatches.get(), totalUploads.get());
+        logger.info("Bulk upload completed. Total images processed: {}", totalProcessed);
     }
 
-    public void registerBatchInShopify(List<String> fileUrls, AtomicInteger totalUploads) {
+
+    public void registerBatchInShopify(List<String> fileUrls, int totalUploads) {
         List<Map<String, String>> filesList = new ArrayList<>();
         for (String fileUrl : fileUrls) {
             String encodedUrl = encodeUrl(fileUrl);
@@ -130,7 +114,7 @@ public class ShopifyService {
             fileEntry.put("alt", fileName);
             fileEntry.put("contentType", contentType);
             filesList.add(fileEntry);
-            totalUploads.incrementAndGet();
+            totalUploads++;
         }
         String query = """
                 mutation fileCreate($files: [FileCreateInput!]!) {

@@ -75,7 +75,7 @@ public class StagingController {
             List<String> urls = new ArrayList<>();
             urls.add(resourceUrl);
             // ✅ 6️⃣ Register the File in Shopify
-            shopifyService.registerBatchInShopify(urls, totalUploads);
+//            shopifyService.registerBatchInShopify(urls, totalUploads);
 
             return ResponseEntity.ok("File uploaded successfully: " + finalFileName);
         } catch (Exception e) {
