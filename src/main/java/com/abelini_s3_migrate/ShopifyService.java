@@ -65,7 +65,7 @@ public class ShopifyService {
         List<String> imageUrls = readCSV(csvFilePath);
         logger.info("total urls count ::: {}", imageUrls.size());
         int batchSize = 100; // Send 100 files per batch
-        ExecutorService executor = Executors.newFixedThreadPool(100); // Parallel execution
+        ExecutorService executor = Executors.newFixedThreadPool(20); // Parallel execution
 
         AtomicInteger activeBatches = new AtomicInteger(0);  // Track running batches
         AtomicInteger completedBatches = new AtomicInteger(0); // Track completed batches
@@ -169,7 +169,7 @@ public class ShopifyService {
     }
 
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-//            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml",
             "image/avif", "video/mp4"
     );
 
@@ -227,14 +227,13 @@ public class ShopifyService {
             return "image/jpeg";
         }
     }
+    private final Set<String> imageMimeTypes = Set.of(
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+    );
 
     private String detectShopifyContentType(String fileUrl) {
-//        String mimeType = detectMimeType(fileUrl);
-//        if ("application/pdf".equals(mimeType)) return "FILE";
-//        if (mimeType.startsWith("image/")) return "IMAGE";
-//        if (mimeType.startsWith("video/")) return "VIDEO";
-
-        return "FILE";
+        String mimeType = detectMimeType(fileUrl);
+        return imageMimeTypes.contains(mimeType) ? "IMAGE" : "FILE";
     }
 
     public String uploadFileToShopify(String s3Url) throws IOException {
