@@ -26,6 +26,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
 
 @Service
 public class ShopifyFileFetcherService {
@@ -156,12 +157,36 @@ public class ShopifyFileFetcherService {
             headers.set("X-Shopify-Access-Token", ACCESS_TOKEN);
             headers.setContentType(MediaType.APPLICATION_JSON);
 
-            // Wrap the request body and headers into an HttpEntity
             HttpEntity<String> entity = new HttpEntity<>(requestBody.toString(), headers);
 
-            String response = restTemplate.postForObject(shopifyStore + SHOPIFY_GRAPHQL_URL, entity, String.class);
+            LOGGER.info("Sending Shopify GraphQL request:");
+            LOGGER.info("URL: " + shopifyStore + SHOPIFY_GRAPHQL_URL);
+            LOGGER.info("Headers: " + headers.entrySet().stream()
+                    .map(e -> e.getKey() + ": " + (e.getKey().equals("X-Shopify-Access-Token") ? "****" : e.getValue()))
+                    .collect(Collectors.joining(", ")));
+            LOGGER.info("Request Body: " + requestBody.toString(2));  // Pretty-print JSON
+
+            ResponseEntity<String> responseEntity = restTemplate.exchange(
+                    shopifyStore + SHOPIFY_GRAPHQL_URL,
+                    HttpMethod.POST,
+                    entity,
+                    String.class
+            );
+
+            // Log Response Headers and Body
+            HttpHeaders responseHeaders = responseEntity.getHeaders();
+            String responseBody = responseEntity.getBody();
+            String requestId = responseHeaders.getFirst("x-request-id");
+
+            LOGGER.info("Received Response:");
+            LOGGER.info("Status: " + responseEntity.getStatusCode());
+            LOGGER.info("Headers: " + responseHeaders);
+            LOGGER.info("X-Request-ID: " + requestId);
+            LOGGER.info("Response Body: " + responseBody);
+
             remainingPoints.addAndGet(-API_COST_PER_CALL);
-            return new JSONObject(response);
+            return new JSONObject(responseBody);
+
         } catch (HttpClientErrorException e) {
             LOGGER.severe("API error: " + e.getMessage());
             return new JSONObject();
@@ -390,9 +415,29 @@ public class ShopifyFileFetcherService {
             headers.setContentType(MediaType.APPLICATION_JSON);
 
             HttpEntity<String> entity = new HttpEntity<>(requestBody.toString(), headers);
+
+            LOGGER.info("Sending Shopify GraphQL polling request:");
+            LOGGER.info("URL: " + shopifyStore + SHOPIFY_GRAPHQL_URL);
+            LOGGER.info("Headers: " + headers.entrySet().stream()
+                    .map(e -> e.getKey() + ": " + (e.getKey().equals("X-Shopify-Access-Token") ? "****" : e.getValue()))
+                    .collect(Collectors.joining(", ")));
+            LOGGER.info("Request Body: " + requestBody.toString(2));  // Pretty-print JSON
+
             ResponseEntity<String> responseEntity = restTemplate.postForEntity(shopifyStore + SHOPIFY_GRAPHQL_URL, entity, String.class);
 
-            return new JSONObject(responseEntity.getBody());
+            // Log Response Headers and Body
+            HttpHeaders responseHeaders = responseEntity.getHeaders();
+            String responseBody = responseEntity.getBody();
+            String requestId = responseHeaders.getFirst("x-request-id");
+
+            LOGGER.info("Received Response:");
+            LOGGER.info("Status: " + responseEntity.getStatusCode());
+            LOGGER.info("Headers: " + responseHeaders);
+            LOGGER.info("X-Request-ID: " + requestId);
+            LOGGER.info("Response Body: " + responseBody);
+
+            return new JSONObject(responseBody);
+
         } catch (HttpClientErrorException e) {
             LOGGER.severe("API error: " + e.getMessage());
             return new JSONObject();
