@@ -37,12 +37,12 @@ public class ShopifyFileFetcherService {
     @Value("${shopify_access_token}")
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
-    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_avif_mp4.csv";
-    private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_avif_mp4_1.csv";
+    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_04-03.csv";
+    private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_export_04-03.csv";
     private static final int API_COST_PER_CALL = 35;
-    private static final int MAX_POINTS = 2000;
-    private static final int RECOVERY_RATE = 100;
-    private static final int SAFE_THRESHOLD = 200;
+    private static final int MAX_POINTS = 20000;
+    private static final int RECOVERY_RATE = 1000;
+    private static final int SAFE_THRESHOLD = 1000;
     private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
     private static final AtomicInteger totalFilesStored = new AtomicInteger(0);
     private static final AtomicInteger batchNumber = new AtomicInteger(1); // AtomicInteger for thread-safe batch number
@@ -81,28 +81,30 @@ public class ShopifyFileFetcherService {
 
             String query = """
                     {
-                        files(first: 250, sortKey: CREATED_AT, query: "created_at:>=2025-02-24"%s) {
-                            edges {
-                                node {
-                                    preview {
-                                        image {
-                                            altText
-                                        }
-                                    }
-                                }
+                      files(first: 250, query: "created_at:>=2025-02-24"%s) {
+                        edges {
+                          node {
+                            alt
+                            __typename
+                            preview {
+                              image {
+                                altText
+                              }
                             }
-                            pageInfo {
-                                hasNextPage
-                                endCursor
-                            }
+                          }
                         }
+                        pageInfo {
+                          hasNextPage
+                          endCursor
+                        }
+                      }
                     }
                     """.formatted(afterClause);
 
             try {
                 JSONObject response = executeGraphQLQuery(query);
                 logger.info("shopify api response ::: {}", response);
-                
+
                 if (!response.has("data") || response.isNull("data")) {
                     LOGGER.severe("Shopify response data is null. Retrying...");
                     continue;
@@ -115,16 +117,31 @@ public class ShopifyFileFetcherService {
 
                 // Process each file
                 for (int i = 0; i < edges.length(); i++) {
-                    String altText = edges.getJSONObject(i)
-                            .getJSONObject("node")
-                            .getJSONObject("preview")
-                            .getJSONObject("image")
-                            .optString("altText", "");
-                    if (!altText.isBlank()) {
-                        fileData.add(new String[]{altText});
-                        totalFilesStored.incrementAndGet();  // Thread-safe increment
+                    JSONObject edge = edges.getJSONObject(i);
+                    JSONObject node = edge.optJSONObject("node");
+                    if (node == null) continue;
+
+                    String alt = node.optString("alt", "");
+
+                    // Optionally still check for preview image altText
+                    String imageAltText = "";
+                    JSONObject preview = node.optJSONObject("preview");
+                    if (preview != null) {
+                        JSONObject image = preview.optJSONObject("image");
+                        if (image != null) {
+                            imageAltText = image.optString("altText", "");
+                        }
+                    }
+
+                    if (!alt.isBlank()) {
+                        fileData.add(new String[]{alt});
+                        totalFilesStored.incrementAndGet();
+                    } else if (!imageAltText.isBlank()) {
+                        fileData.add(new String[]{imageAltText});
+                        totalFilesStored.incrementAndGet();
                     }
                 }
+
 
                 LOGGER.info("Total files stored so far: " + totalFilesStored.get());
 
@@ -137,7 +154,7 @@ public class ShopifyFileFetcherService {
                 }
             } catch (Exception e) {
                 LOGGER.severe("Error fetching batch " + currentBatchNumber + ": " + e.getMessage());
-              continue;
+                continue;
             }
 
             LOGGER.info("Batch " + currentBatchNumber + " completed.");
