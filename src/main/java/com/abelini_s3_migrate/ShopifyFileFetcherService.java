@@ -469,7 +469,7 @@ public class ShopifyFileFetcherService {
 
     // Supported MIME types for images.
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml",
             "image/avif", "video/mp4"
     );
 
