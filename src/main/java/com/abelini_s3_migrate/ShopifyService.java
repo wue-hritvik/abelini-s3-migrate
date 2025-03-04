@@ -22,10 +22,11 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -59,63 +60,113 @@ public class ShopifyService {
         }
     }
 
+    private static final int MAX_CONCURRENT_BATCHES = 10;
+    private static final Semaphore semaphore = new Semaphore(MAX_CONCURRENT_BATCHES);
+    private final AtomicInteger totalProcessed = new AtomicInteger(0);
+    private static final int API_COST_PER_CALL = 40;
+    private static final int MAX_POINTS = 20000;
+    private static final int RECOVERY_RATE = 1000;
+    private static final int SAFE_THRESHOLD = 1000;
+    private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
+
     @Async
     public void uploadImagesToShopify(String csvFilePath) throws IOException, CsvException {
-        logger.info("Starting bulk upload to Shopify...");
+        logger.info("Starting bulk upload to Shopify... started at :: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
         List<String> imageUrls = readCSV(csvFilePath);
         logger.info("Total URLs count: {}", imageUrls.size());
 
-        int batchSize = 50; // Batch size of 50
+        int batchSize = 100;
         int totalBatches = (int) Math.ceil((double) imageUrls.size() / batchSize);
-        int totalProcessed = 0;
+
+        ExecutorService executorService = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
+
+        List<Future<?>> futures = new ArrayList<>();
 
         for (int i = 0; i < imageUrls.size(); i += batchSize) {
-            List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
-            int batchNumber = (i / batchSize) + 1;
+            final int batchNumber = (i / batchSize) + 1;
+            final List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
 
-            logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
-
-            try {
-                registerBatchInShopify(batch, totalProcessed);
-                totalProcessed += batch.size();
-
-                logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, totalProcessed, imageUrls.size());
-            } catch (Exception e) {
-                logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-            }
-
-            // Wait for 1 second before processing the next batch
-            if (i + batchSize < imageUrls.size()) {
-                logger.info("Waiting for 1 second before next batch...");
+            futures.add(executorService.submit(() -> {
                 try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    semaphore.acquire();
+                    regulateApiRate();
+                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
+                    remainingPoints.addAndGet(-API_COST_PER_CALL);
+                    int count = registerBatchInShopify(batch);
+
+                    int processed = totalProcessed.addAndGet(count);
+                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, processed, imageUrls.size());
+                } catch (Exception e) {
+                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+                } finally {
+                    semaphore.release();
                 }
+            }));
+        }
+
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
             }
         }
 
-        logger.info("Bulk upload completed. Total images processed: {}", totalProcessed);
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
+                logger.warn("Executor did not terminate in the specified time.");
+                executorService.shutdownNow();
+                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+                    logger.error("Executor did not terminate after forced shutdown.");
+                }
+            } else {
+                logger.info("All batches completed successfully within 5 minutes.");
+            }
+        } catch (InterruptedException e) {
+            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
+        logger.info("Bulk upload completed. Total images processed: {}, ended at :: {}", totalProcessed.get(),ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
     }
 
+    private void regulateApiRate() {
+        if (remainingPoints.get() < SAFE_THRESHOLD) {
+            int waitTime = Math.min(5, (MAX_POINTS - remainingPoints.get()) / RECOVERY_RATE);
+            logger.info("Low API points (" + remainingPoints.get() + "), pausing for " + waitTime + " seconds to recover.");
+            try {
+                TimeUnit.SECONDS.sleep(waitTime);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            remainingPoints.addAndGet(waitTime * RECOVERY_RATE);  // Thread-safe increment
+        }
+    }
 
-    public void registerBatchInShopify(List<String> fileUrls, int totalUploads) {
+    public int registerBatchInShopify(List<String> fileUrls) {
         List<Map<String, String>> filesList = new ArrayList<>();
         for (String fileUrl : fileUrls) {
             String encodedUrl = encodeUrl(fileUrl);
             String fileName = generateShopifyFilePath(fileUrl);
             String contentType = detectShopifyContentType(fileUrl);
             if (notSupportedFileType(fileUrl)) continue;
-            logger.info("contentType ::: {}", contentType);
+//            logger.info("contentType ::: {}", contentType);
             Map<String, String> fileEntry = new HashMap<>();
             fileEntry.put("originalSource", encodedUrl);
             fileEntry.put("filename", fileName);
             fileEntry.put("alt", fileName);
             fileEntry.put("contentType", contentType);
             filesList.add(fileEntry);
-            totalUploads++;
         }
+
+        if (filesList.isEmpty()) {
+            logger.warn("No supported files in this batch.");
+            return 0;
+        }
+
         String query = """
                 mutation fileCreate($files: [FileCreateInput!]!) {
                     fileCreate(files: $files) {
@@ -140,15 +191,17 @@ public class ShopifyService {
             logger.info("Uploading batch of {} files to Shopify", filesList.size());
             String response = sendGraphQLRequest(query, variables);
             logger.info("Shopify Response: {}", response);
-            if (response.contains("\"userErrors\":[")) {  // Instead of just checking if "userErrors" exists
-                if (!response.contains("\"userErrors\":[]")) { // Only log if errors are present
+            if (response.contains("\"userErrors\":[")) {
+                if (!response.contains("\"userErrors\":[]")) {
                     logger.error("Error uploading batch: {}", response);
-                } else {
-                    logger.info("Batch uploaded successfully.");
+                    return 0;
                 }
             }
+            logger.info("Batch uploaded successfully.");
+            return filesList.size();
         } catch (Exception e) {
             logger.error("Error in batch upload: {}", e.getMessage(), e);
+            return 0;
         }
     }
 
@@ -199,7 +252,7 @@ public class ShopifyService {
     private String generateShopifyFilePath(String fileUrl) {
         String relativePath = fileUrl.substring(fileUrl.indexOf(".com/") + 5).replace("/", "_");
         String fileName = Pattern.compile("\\s+").matcher(relativePath).replaceAll("_");
-        logger.info("file name ::: {}", fileName);
+//        logger.info("file name ::: {}", fileName);
         return fileName;
     }
 
