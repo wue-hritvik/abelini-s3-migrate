@@ -469,7 +469,7 @@ public class ShopifyFileFetcherService {
 
     // Supported MIME types for images.
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-//            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
             "image/avif", "video/mp4"
     );
 
@@ -864,10 +864,10 @@ public class ShopifyFileFetcherService {
     public boolean isSupportedImage(String fileUrl) {
         String lowerUrl = fileUrl.toLowerCase();
         // Quick check based on file extension.
-//        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
-//                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
-//            return true;
-//        }
+        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
+                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
+            return true;
+        }
         if (lowerUrl.endsWith(".avif") || lowerUrl.endsWith(".mp4")) {
             return true;
         }
