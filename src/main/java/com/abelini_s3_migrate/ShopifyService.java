@@ -76,7 +76,7 @@ public class ShopifyService {
         List<String> imageUrls = readCSV(csvFilePath);
         logger.info("Total URLs count: {}", imageUrls.size());
 
-        int batchSize = 100;
+        int batchSize = 50;
         int totalBatches = (int) Math.ceil((double) imageUrls.size() / batchSize);
 
         ExecutorService executorService = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
@@ -86,51 +86,70 @@ public class ShopifyService {
         for (int i = 0; i < imageUrls.size(); i += batchSize) {
             final int batchNumber = (i / batchSize) + 1;
             final List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
+            logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
+//            futures.add(executorService.submit(() -> {
+//                try {
+//                    semaphore.acquire();
+//                    regulateApiRate();
+//                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
+//                    remainingPoints.addAndGet(-API_COST_PER_CALL);
+//                    int count = registerBatchInShopify(batch);
+//
+//                    int processed = totalProcessed.addAndGet(count);
+//                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, processed, imageUrls.size());
+//                } catch (Exception e) {
+//                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+//                } finally {
+//                    semaphore.release();
+//                }
+//            }));
 
-            futures.add(executorService.submit(() -> {
-                try {
-                    semaphore.acquire();
-                    regulateApiRate();
-                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
-                    remainingPoints.addAndGet(-API_COST_PER_CALL);
-                    int count = registerBatchInShopify(batch);
+//        }
 
-                    int processed = totalProcessed.addAndGet(count);
-                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, processed, imageUrls.size());
-                } catch (Exception e) {
-                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-                } finally {
-                    semaphore.release();
-                }
-            }));
-        }
-
-        for (Future<?> future : futures) {
+//        for (Future<?> future : futures) {
+//            try {
+//                future.get();
+//            } catch (InterruptedException | ExecutionException e) {
+//                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
+//            }
+//        }
+//
+//        executorService.shutdown();
+//        try {
+//            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
+//                logger.warn("Executor did not terminate in the specified time.");
+//                executorService.shutdownNow();
+//                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+//                    logger.error("Executor did not terminate after forced shutdown.");
+//                }
+//            } else {
+//                logger.info("All batches completed successfully within 5 minutes.");
+//            }
+//        } catch (InterruptedException e) {
+//            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
+//            executorService.shutdownNow();
+//            Thread.currentThread().interrupt();
+//        }
             try {
-                future.get();
-            } catch (InterruptedException | ExecutionException e) {
-                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
+                regulateApiRate();
+                remainingPoints.addAndGet(-API_COST_PER_CALL);
+                int count = registerBatchInShopify(batch);
+                totalProcessed.addAndGet(count);
+                logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, totalProcessed.get(), imageUrls.size());
+            } catch (Exception e) {
+                logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
             }
-        }
 
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
-                logger.warn("Executor did not terminate in the specified time.");
-                executorService.shutdownNow();
-                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
-                    logger.error("Executor did not terminate after forced shutdown.");
+            if (i + batchSize < imageUrls.size()) {
+                logger.info("Waiting for 1 second before next batch...");
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
                 }
-            } else {
-                logger.info("All batches completed successfully within 5 minutes.");
             }
-        } catch (InterruptedException e) {
-            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
         }
-
-        logger.info("Bulk upload completed. Total images processed: {}, ended at :: {}", totalProcessed.get(),ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
+        logger.info("Bulk upload completed. Total images processed: {}, ended at :: {}", totalProcessed.get(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
     }
 
     private void regulateApiRate() {
@@ -264,6 +283,7 @@ public class ShopifyService {
             return "image/jpeg";
         }
     }
+
     private final Set<String> imageMimeTypes = Set.of(
             "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
     );
