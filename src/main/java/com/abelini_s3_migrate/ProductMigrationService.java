@@ -27,6 +27,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -128,7 +129,7 @@ public class ProductMigrationService {
             Map<String, Object> variables = Map.of("type", type);
 
             // Make the Shopify API call
-            String response = sendGraphQLRequest(GRAPHQL_QUERY_METAOBJECT, objectMapper.writeValueAsString(variables));
+            String response = sendGraphQLRequest(GRAPHQL_QUERY_METAOBJECT, objectMapper.writeValueAsString(variables), false);
 
             if (response == null) {
                 logger.error("error while fetching meta object details type :: {}", type);
@@ -154,9 +155,14 @@ public class ProductMigrationService {
         return result;
     }
 
-    private String sendGraphQLRequest(String query, String variables) {
+    private String sendGraphQLRequest(String query, String variables, boolean is24) {
         try {
-            String url = shopifyStore + "/admin/api/2025-01/graphql.json";
+            String url = "";
+            if (is24) {
+                url = shopifyStore + "/admin/api/2024-04/graphql.json";
+            } else {
+                url = shopifyStore + "/admin/api/2025-01/graphql.json";
+            }
 
             HttpHeaders headers = new HttpHeaders();
             headers.set("X-Shopify-Access-Token", accessToken.trim());
@@ -202,7 +208,8 @@ public class ProductMigrationService {
             }
 
             return body;
-        } catch (Exception e) {
+        } catch (
+                Exception e) {
             logger.error("Error sending GraphQL request: {}", e.getMessage(), e);
             return null;
         }
@@ -317,7 +324,7 @@ public class ProductMigrationService {
 
                 Map<String, Object> product = new HashMap<>();
                 product.put("product", data);
-                String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_CREATE, objectMapper.writeValueAsString(product));
+                String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_CREATE, objectMapper.writeValueAsString(product), false);
 
                 if (response == null) {
                     logger.error("error while creating product id: " + id);
@@ -327,9 +334,11 @@ public class ProductMigrationService {
                     continue;
                 }
 
-                List<JSONObject> metaFields = processMetafields(apiResponse);
-
                 Map<String, String> extratcIds = extractProductIdAndVariendId(response);
+
+                getBaseVarientAndSetSkuAndPrice(extratcIds.get("product"), apiResponse);
+
+                List<JSONObject> metaFields = processMetafields(apiResponse);
 
                 processApiResponseAndUploadMetafields(extratcIds.get("product"), metaFields);
 
@@ -344,6 +353,115 @@ public class ProductMigrationService {
 
         } catch (Exception e) {
             logger.error("error in process product :: {}", e.getMessage(), e);
+        }
+    }
+
+    private void getBaseVarientAndSetSkuAndPrice(String productId, JSONObject apiResponse) {
+        try {
+            // Step 1: Fetch Base Variant ID
+            String query = """
+                        query GetBaseVariant($productId: ID!) {
+                            product(id: $productId) {
+                                variants(first: 1) {
+                                    edges {
+                                        node {
+                                            id
+                                            sku
+                                            price
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    """;
+
+            Map<String, Object> variable = new HashMap<>();
+            variable.put("productId", productId);
+
+            String response = sendGraphQLRequest(query, objectMapper.writeValueAsString(variable), false);
+            if (response == null) {
+                logger.error("Failed to fetch base variant for product ID: {}", productId);
+                return;
+            }
+
+            JSONObject responseObj = new JSONObject(response);
+
+            // Extract base variant ID
+            JSONObject data = responseObj.optJSONObject("data");
+            if (data == null) {
+                logger.error("Invalid GraphQL response: 'data' is missing");
+                return;
+            }
+
+            JSONObject product = data.optJSONObject("product");
+            if (product == null) {
+                logger.warn("No product found for ID: {}", productId);
+                return;
+            }
+
+            JSONObject variants = product.optJSONObject("variants");
+            if (variants == null) {
+                logger.warn("No variants found for product ID: {}", productId);
+                return;
+            }
+
+            JSONArray edges = variants.optJSONArray("edges");
+            if (edges == null || edges.isEmpty()) {
+                logger.warn("No variant edges found for product ID: {}", productId);
+                return;
+            }
+
+            // Extract base variant
+            JSONObject baseVariant = edges.getJSONObject(0).optJSONObject("node");
+            if (baseVariant == null) {
+                logger.warn("Base variant node is missing for product ID: {}", productId);
+                return;
+            }
+
+            String variantId = baseVariant.optString("id", null);
+            if (variantId == null) {
+                logger.warn("Variant ID is missing for product ID: {}", productId);
+                return;
+            }
+
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("variantId", variantId);
+
+            if (apiResponse.has("sku")) {
+                variables.put("sku", apiResponse.optString("sku"));
+            }
+
+            if (apiResponse.has("price")) {
+                String priceStr = String.format("%.2f", apiResponse.optDouble("price", 0.0)); // Ensure 2 decimal places
+                variables.put("price", new BigDecimal(priceStr));
+            }
+
+            // Correct Mutation
+            String mutation = """
+                    mutation UpdateVariant($variantId: ID!, $sku: String, $price: Money) {
+                      productVariantUpdate(input: { id: $variantId, sku: $sku, price: $price }) {
+                        productVariant {
+                          id
+                          sku
+                          price
+                        }
+                        userErrors {
+                          field
+                          message
+                        }
+                      }
+                    }
+                    """;
+
+            String updateResponse = sendGraphQLRequest(mutation, objectMapper.writeValueAsString(variables), true);
+            if (updateResponse == null) {
+                logger.error("Failed to update variant ID: {}", variantId);
+            }
+
+            logger.info("varient update successfully for product id: " + productId);
+
+        } catch (Exception e) {
+            logger.error("Error processing base variant update: {}", e.getMessage(), e);
         }
     }
 
@@ -418,7 +536,7 @@ public class ProductMigrationService {
             }
             value = objectMapper.writeValueAsString(value);
         } else if (type.contains("json")) {
-            value = objectMapper.writeValueAsString(gson.toJson(value));
+            value = objectMapper.writeValueAsString(value.toString());
         }
 
         // Construct GraphQL mutation for adding a metafield
@@ -636,7 +754,7 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "having_down_360", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "having_front_360", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "default_view", "single_line_text_field");
-        addMetafield(processedMetafields, rawMetafields, "filter", "multi_line_text_field", "metal");
+        addMetafield(processedMetafields, rawMetafields, "filter", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "upc", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "product_type_id", "number_integer");
         addMetafield(processedMetafields, rawMetafields, "diamond_selection", "single_line_text_field");
@@ -654,9 +772,10 @@ public class ProductMigrationService {
         addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "metal", this::getMetalIds);
         addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "stone_type", this::getStoneTypeIds);
         addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "shape", this::getShapeIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "backing", this::getBackingIds);
+//        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "carat", this::getCaratIds);
         addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "setting_type", this::getSettingTypeIds);
         addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "by_recipient", this::getRecipientIds);
-        addProcessedMetafield(processedMetafields, rawMetafields, "backing", "list.metaobject_reference", "backing", this::getBackingIds);
 
         return processedMetafields;
     }
@@ -666,7 +785,9 @@ public class ProductMigrationService {
     }
 
     private void addMetafield(List<JSONObject> metafields, JSONObject rawMetafields, String key, String type, String metafieldKey) {
+        logger.info("checking for meta fields :: {}", key);
         if (rawMetafields.has(key) && !rawMetafields.isNull(key)) {
+            logger.info("checking success for meta fields :: {}", key);
             JSONObject metafield = new JSONObject();
             metafield.put("namespace", "custom");
             metafield.put("key", metafieldKey);
@@ -677,7 +798,9 @@ public class ProductMigrationService {
     }
 
     private void addProcessedMetafield(List<JSONObject> metafields, JSONObject rawMetafields, String key, String type, String metafieldKey, Function<Object, Object> processor) throws JsonProcessingException {
+        logger.info("checking for processed meta fields :: {}", key);
         if (rawMetafields.has(key) && !rawMetafields.isNull(key)) {
+            logger.info("checking for success processed meta fields :: {}", key);
             JSONObject metafield = new JSONObject();
             metafield.put("namespace", "custom");
             metafield.put("key", metafieldKey);
@@ -689,6 +812,7 @@ public class ProductMigrationService {
 
     private List<String> getRecipientIds(Object productOptions) {
         List<String> names = extractNamesByFilterGroupId(productOptions, "8");
+        logger.info("extract recipient :: {}", names);
         List<String> ids = new ArrayList<>();
         for (String name : names) {
             if (recipientMap.containsKey(name)) {
@@ -700,6 +824,7 @@ public class ProductMigrationService {
 
     private List<String> getSettingTypeIds(Object productOptions) {
         List<String> names = extractNamesByFilterGroupId(productOptions, "6");
+        logger.info("extract setting type :: {}", names);
         List<String> ids = new ArrayList<>();
         for (String name : names) {
             if (settingTypeMap.containsKey(name)) {
@@ -728,6 +853,7 @@ public class ProductMigrationService {
     private List<String> getStoneTypeIds(Object productOptions) {
         try {
             List<String> names = extractOptionNames(productOptions, "stone_type");
+            logger.info("extract stone type :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
                 if (stoneTypeMap.containsKey(name)) {
@@ -743,6 +869,7 @@ public class ProductMigrationService {
     private List<String> getMetalIds(Object productOptions) {
         try {
             List<String> names = extractOptionNames(productOptions, "metal");
+            logger.info("extract metal :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
                 if (metalMap.containsKey(name)) {
@@ -757,7 +884,9 @@ public class ProductMigrationService {
 
     private Object getBackingIds(Object backing) {
         try {
-            List<String> names = extractBackingNames(objectMapper.writeValueAsString(backing));
+            logger.info("inside get backing ids");
+            List<String> names = extractOptionNames(backing, "backing");
+            logger.info("extract backing :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
                 if (backingMap.containsKey(name)) {
@@ -770,28 +899,34 @@ public class ProductMigrationService {
         }
     }
 
-    public List<String> extractBackingNames(String json) {
+    public List<String> extractBackingNames(Object json) {
         List<String> names = new ArrayList<>();
-
+        logger.info("inside extract backing names");
         try {
-            // Parse JSON string into a JsonObject
-            JsonObject jsonObject = gson.fromJson(json, JsonObject.class);
+            JsonNode rootNode = objectMapper.readTree(json.toString());
 
-            // Check if "backing" exists
-            if (jsonObject.has("backing")) {
-                JsonObject backingObject = jsonObject.getAsJsonObject("backing");
+            logger.info("Extracting backing names from JSON: {}", rootNode.toPrettyString());
 
-                // Check if "product_option_value" exists
-                if (backingObject.has("product_option_value")) {
-                    JsonElement optionValueElement = backingObject.get("product_option_value");
+            // Ensure the root node is an array
+            if (!rootNode.isArray()) {
+                logger.warn("JSON root is not an array. Expected an array of backing objects.");
+                return names;
+            }
 
-                    if (optionValueElement.isJsonObject()) {
-                        JsonObject optionValues = optionValueElement.getAsJsonObject();
+            // Iterate over each backing object
+            for (JsonNode backing : rootNode) {
+                if (backing.has("product_option_value")) {
+                    JsonNode valuesNode = backing.get("product_option_value");
 
-                        for (Map.Entry<String, JsonElement> entry : optionValues.entrySet()) {
-                            JsonObject valueObj = entry.getValue().getAsJsonObject();
-                            if (valueObj.has("name")) {
-                                names.add(valueObj.get("name").getAsString());
+                    if (valuesNode.isObject()) {
+                        // Iterate over each nested object (keys like "1", "2", "3")
+                        Iterator<JsonNode> elements = valuesNode.elements();
+                        while (elements.hasNext()) {
+                            JsonNode item = elements.next();
+                            if (item.has("name") && !item.get("name").isNull()) {
+                                String name = item.get("name").asText();
+                                logger.info("Found name: {}", name);
+                                names.add(name);
                             }
                         }
                     } else {
@@ -800,9 +935,8 @@ public class ProductMigrationService {
                 } else {
                     logger.warn("'product_option_value' key is missing.");
                 }
-            } else {
-                logger.warn("'backing' key is missing.");
             }
+
         } catch (Exception e) {
             logger.error("Error extracting backing names: {}", e.getMessage(), e);
         }
@@ -848,51 +982,38 @@ public class ProductMigrationService {
     }
 
 
-    private List<String> extractNamesByFilterGroupId(Object productOptions, String targetFilterGroupId) {
-        List<String> result = new ArrayList<>();
+    private List<String> extractNamesByFilterGroupId(Object json, String targetFilterGroupId) {
+        List<String> names = new ArrayList<>();
 
         try {
-            Map<String, Object> optionsMap;
+            JsonNode rootNode = objectMapper.readTree(json.toString());
 
-            // ✅ Convert JSON string to Map (if needed)
-            if (productOptions instanceof String) {
-                optionsMap = gson.fromJson((String) productOptions, new TypeToken<Map<String, Object>>() {
-                }.getType());
-            } else if (productOptions instanceof Map) {
-                optionsMap = (Map<String, Object>) productOptions;
-            } else {
-                logger.warn("Invalid productOptions format: Expected JSON string or Map<String, Object>.");
-                return result;
+            logger.info("Extracting names for filter_group_id: {} :: {}", targetFilterGroupId, rootNode.toPrettyString());
+
+            // Ensure the root node is an array
+            if (!rootNode.isArray()) {
+                logger.warn("JSON root is not an array. Expected an array of filter objects.");
+                return names;
             }
 
-            // ✅ Check if 'product_filters' exists and is a list
-            if (optionsMap.containsKey("product_filters")) {
-                Object filtersObj = optionsMap.get("product_filters");
+            // Iterate over each filter object
+            for (JsonNode filter : rootNode) {
+                if (filter.has("filter_group_id") && filter.has("name")) {
+                    String filterGroupId = filter.get("filter_group_id").asText();
 
-                List<Map<String, Object>> productFilters = gson.fromJson(
-                        gson.toJson(filtersObj),
-                        new TypeToken<List<Map<String, Object>>>() {
-                        }.getType()
-                );
-
-                // ✅ Extract names for matching filter_group_id
-                for (Map<String, Object> filter : productFilters) {
-                    if (filter.containsKey("filter_group_id")) {
-                        String filterGroupId = String.valueOf(filter.get("filter_group_id")); // Convert to String
-
-                        if (targetFilterGroupId.equals(filterGroupId) && filter.containsKey("name")) {
-                            result.add(filter.get("name").toString()); // Extract 'name' field
-                        }
+                    if (targetFilterGroupId.equals(filterGroupId)) {
+                        String name = filter.get("name").asText();
+                        logger.info("Found name: {}", name);
+                        names.add(name);
                     }
                 }
-            } else {
-                logger.warn("No 'product_filters' key found in productOptions.");
             }
+
         } catch (Exception e) {
-            logger.error("Error extracting names by filter group ID: {}", e.getMessage(), e);
+            logger.error("Error parsing JSON: {}", e.getMessage(), e);
         }
 
-        return result;
+        return names;
     }
 
 
