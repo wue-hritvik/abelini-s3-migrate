@@ -16,7 +16,7 @@ public class ProductMigrateController {
     private ProductMigrationService migrationService;
 
     @PostMapping("/upload")
-    public ResponseEntity<String> uploadFile(@RequestParam(value = "file", required = false) MultipartFile file,
+    public ResponseEntity<String> uploadFile(@RequestPart(value = "file", required = false) MultipartFile file,
                                              @RequestParam(defaultValue = "0", required = false) String id) {
         try {
             migrationService.processProducts(file, id);

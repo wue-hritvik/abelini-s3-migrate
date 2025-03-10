@@ -54,6 +54,8 @@ public class ProductMigrationService {
     @Value("${shopify_access_token}")
     private String accessToken;
 
+    private final ProductIdsRepository productIdsRepository;
+
     private final Gson gson = new Gson();
     private final RestTemplate restTemplate = new RestTemplate();
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -65,6 +67,10 @@ public class ProductMigrationService {
     private static final int RECOVERY_RATE = 1000;
     private static final int SAFE_THRESHOLD = 1000;
     private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
+
+    public ProductMigrationService(ProductIdsRepository productIdsRepository) {
+        this.productIdsRepository = productIdsRepository;
+    }
 
     private void regulateApiRate() {
         if (remainingPoints.get() < SAFE_THRESHOLD) {
@@ -220,9 +226,9 @@ public class ProductMigrationService {
         return fetchMetaobjectDetails("metal");
     }
 
-    public Map<String, String> getAllBackingDetails() {
-        return fetchMetaobjectDetails("backing");
-    }
+//    public Map<String, String> getAllBackingDetails() {
+//        return fetchMetaobjectDetails("backing");
+//    }
 
     public Map<String, String> getAllRecipientDetails() {
         return fetchMetaobjectDetails("by_recipient");
@@ -240,12 +246,62 @@ public class ProductMigrationService {
         return fetchMetaobjectDetails("stone_type");
     }
 
+    private Map<String, String> getAllStyleProductDetails() {
+        return fetchMetaobjectDetails("style_product");
+    }
+
+    private Map<String, String> getAllBandWidthDetails() {
+        return fetchMetaobjectDetails("band_width");
+    }
+
+    private Map<String, String> getAllCaratDetails() {
+        return fetchMetaobjectDetails("carat");
+    }
+
+    private Map<String, String> getAllPersonilizationDetails() {
+        return fetchMetaobjectDetails("personalised");
+    }
+
+    private Map<String, String> getAllOccasionDetails() {
+        return fetchMetaobjectDetails("by_occasion");
+    }
+
+    private Map<String, String> getAllRingSizeDetails() {
+        return fetchMetaobjectDetails("ring_size");
+    }
+
+    private Map<String, String> getAllClarityDetails() {
+        return fetchMetaobjectDetails("clarity");
+    }
+
+    private Map<String, String> getAllCertificateDetails() {
+        return fetchMetaobjectDetails("certificate");
+    }
+
+    private Map<String, String> getAllColourDetails() {
+        return fetchMetaobjectDetails("colour");
+    }
+
+    private Map<String, String> getAllCategoryDetails() {
+        return fetchMetaobjectDetails("category");
+    }
+
     private static final Map<String, String> metalMap = new ConcurrentHashMap<>();
     private static final Map<String, String> stoneTypeMap = new ConcurrentHashMap<>();
     private static final Map<String, String> shapeMap = new ConcurrentHashMap<>();
     private static final Map<String, String> settingTypeMap = new ConcurrentHashMap<>();
     private static final Map<String, String> recipientMap = new ConcurrentHashMap<>();
-    private static final Map<String, String> backingMap = new ConcurrentHashMap<>();
+    //    private static final Map<String, String> backingMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> categoryMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> colourMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> certificateMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> clarityMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> ringSizeMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> occasionMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> personilizationMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> caratMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> bandWidthMap = new ConcurrentHashMap<>();
+    private static final Map<String, String> styleProductMap = new ConcurrentHashMap<>();
     private static final AtomicBoolean initialized = new AtomicBoolean(false);
 
     @PostConstruct
@@ -270,8 +326,39 @@ public class ProductMigrationService {
             recipientMap.putAll(getAllRecipientDetails());
             logger.info("Loaded all recipient :: {}", recipientMap);
 
-            backingMap.putAll(getAllBackingDetails());
-            logger.info("Loaded all backing :: {}", backingMap);
+//            backingMap.putAll(getAllBackingDetails());
+//            logger.info("Loaded all backing :: {}", backingMap);
+
+            categoryMap.putAll(getAllCategoryDetails());
+            logger.info("Loaded all category :: {}", categoryMap);
+
+            colourMap.putAll(getAllColourDetails());
+            logger.info("Loaded all colour :: {}", colourMap);
+
+            certificateMap.putAll(getAllCertificateDetails());
+            logger.info("Loaded all certificate :: {}", certificateMap);
+
+            clarityMap.putAll(getAllClarityDetails());
+            logger.info("Loaded all clarity :: {}", clarityMap);
+
+            ringSizeMap.putAll(getAllRingSizeDetails());
+            logger.info("Loaded all ring size :: {}", ringSizeMap);
+
+            occasionMap.putAll(getAllOccasionDetails());
+            logger.info("Loaded all occasion :: {}", occasionMap);
+
+            personilizationMap.putAll(getAllPersonilizationDetails());
+            logger.info("Loaded all personilization :: {}", personilizationMap);
+
+            caratMap.putAll(getAllCaratDetails());
+            logger.info("Loaded all carat :: {}", caratMap);
+
+            bandWidthMap.putAll(getAllBandWidthDetails());
+            logger.info("Loaded all band width :: {}", bandWidthMap);
+
+            styleProductMap.putAll(getAllStyleProductDetails());
+            logger.info("Loaded all style product :: {}", styleProductMap);
+
         }
     }
 
@@ -302,51 +389,58 @@ public class ProductMigrationService {
             long totalCount = ids.size();
             logger.info("total count :: {}", totalCount);
             for (String id : ids) {
+                totalProcessed.incrementAndGet();
+                try {
+                    logger.info("Processing product id: " + id);
+                    JSONObject apiResponse = fetchProductDetailsFromApi(id);
 
-                logger.info("Processing product id: " + id);
-                JSONObject apiResponse = fetchProductDetailsFromApi(id);
+                    if (apiResponse == null || apiResponse.isEmpty()) {
+                        logger.error("null or empty error while creating product id: " + id);
+                        totalFailed.incrementAndGet();
+                        logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, false, totalProcessed.get(), totalCount);
+                        continue;
+                    }
 
-                if (apiResponse == null || apiResponse.isEmpty()) {
-                    logger.error("error while creating product id: " + id);
-                    apiResponse = null;
-                    totalProcessed.incrementAndGet();
-                    totalFailed.incrementAndGet();
-                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, apiResponse != null, totalProcessed.get(), totalCount);
-                    continue;
-                }
-
-                Map<String, Object> data = processResponse(apiResponse);
+                    Map<String, Object> data = processResponse(apiResponse);
 
 //                String mutation = buildProductCreateMutation(data);
 
-                regulateApiRate();
-                remainingPoints.addAndGet(-API_COST_PER_CALL);
+                    regulateApiRate();
+                    remainingPoints.addAndGet(-API_COST_PER_CALL);
 
-                Map<String, Object> product = new HashMap<>();
-                product.put("product", data);
-                String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_CREATE, objectMapper.writeValueAsString(product), false);
+                    Map<String, Object> product = new HashMap<>();
+                    product.put("product", data);
+                    String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_CREATE, objectMapper.writeValueAsString(product), false);
 
-                if (response == null) {
-                    logger.error("error while creating product id: " + id);
-                    totalProcessed.incrementAndGet();
+                    if (response == null) {
+                        logger.error("shopify response null error while creating product id: " + id);
+                        totalFailed.incrementAndGet();
+                        logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, false, totalProcessed.get(), totalCount);
+                        continue;
+                    }
+
+                    Map<String, String> extratcIds = extractProductIdAndVariendId(response);
+
+                    //saved ids in db
+                    ProductIds pi = new ProductIds();
+                    pi.setProductId(id);
+                    pi.setShopifyProductId(extratcIds.get("product"));
+                    productIdsRepository.save(pi);
+
+                    getBaseVarientAndSetSkuAndPrice(extratcIds.get("product"), apiResponse);
+
+                    List<JSONObject> metaFields = processMetafields(apiResponse);
+
+                    processApiResponseAndUploadMetafields(extratcIds.get("product"), metaFields);
+
+                    logger.info("Product created successfully for product id: " + id);
+                    totalSuccess.incrementAndGet();
+
+                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, response != null, totalProcessed.get(), totalCount);
+                } catch (Exception e) {
                     totalFailed.incrementAndGet();
-                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, false, totalProcessed.get(), totalCount);
-                    continue;
+                    logger.error("error in product create for id :: {} :: {}", id, e.getMessage(), e);
                 }
-
-                Map<String, String> extratcIds = extractProductIdAndVariendId(response);
-
-                getBaseVarientAndSetSkuAndPrice(extratcIds.get("product"), apiResponse);
-
-                List<JSONObject> metaFields = processMetafields(apiResponse);
-
-                processApiResponseAndUploadMetafields(extratcIds.get("product"), metaFields);
-
-                totalProcessed.incrementAndGet();
-                logger.info("Product created successfully for product id: " + id);
-                totalSuccess.incrementAndGet();
-
-                logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, response != null, totalProcessed.get(), totalCount);
             }
 
             logger.info("Import process complete with total processed :: {}/{} with success: {}, failed: {} and ended at :: {}", totalProcessed.get(), totalCount, totalSuccess.get(), totalFailed.get(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
@@ -619,59 +713,6 @@ public class ProductMigrationService {
     }
 
 
-//    public String buildProductCreateMutation(JSONObject apiResponse) {
-//
-//        try {
-//            ObjectNode productNode = objectMapper.createObjectNode();
-//
-//            if (apiResponse.has("title")) {
-//                productNode.put("title", apiResponse.get("title").toString());
-//            }
-//            if (apiResponse.has("descriptionHtml")) {
-//                productNode.put("descriptionHtml", apiResponse.get("descriptionHtml").toString());
-//            }
-//            if (apiResponse.has("tags")) {
-//                productNode.put("tags", apiResponse.get("tags").toString());
-//            }
-//            if (apiResponse.has("sku")) {
-//                productNode.put("sku", apiResponse.get("sku").toString());
-//            }
-//            if (apiResponse.has("price")) {
-//                productNode.put("price", apiResponse.get("price").toString());
-//            }
-//
-//            // Variants
-//            if (apiResponse.has("sku")) {
-//                ObjectNode variantNode = objectMapper.createObjectNode();
-//                variantNode.put("sku", apiResponse.get("sku").toString());
-//                productNode.set("variants", objectMapper.createArrayNode().add(variantNode));
-//            }
-//
-//            String productJson = objectMapper.writeValueAsString(productNode);
-//            logger.info("formatted product json :: {}", productJson);
-//
-//            return """
-//                    mutation ProductCreateWithMetafields {
-//                      productCreate(
-//                        product: %s
-//                      ) {
-//                        product {
-//                          id
-//                          title
-//                        }
-//                        userErrors {
-//                          field
-//                          message
-//                        }
-//                      }
-//                    }
-//                    """.formatted(productJson);
-//
-//        } catch (Exception e) {
-//            throw new RuntimeException("Error building GraphQL mutation", e);
-//        }
-//    }
-
     private JSONObject fetchProductDetailsFromApi(String productId) {
         String url = "https://www.abelini.com/shopify/api/product/product_detail.php";
         Map<String, String> request = new HashMap<>();
@@ -720,23 +761,20 @@ public class ProductMigrationService {
             response.put("tags", apiResponse.optString("tag"));
         }
 
-//        if (apiResponse.has("sku")) {
-//            response.put("sku", apiResponse.optString("sku"));
-//        }
+        Map<String, Object> seo = new HashMap<>();
+        if (apiResponse.has("meta_title")) {
+            seo.put("title", apiResponse.optString("meta_title"));
+        } else if (apiResponse.has("name")) {
+            seo.put("title", apiResponse.optString("name"));
+        }
 
-//        if (apiResponse.has("price")) {
-//            response.put("price", apiResponse.optDouble("price", 0.0));
-//        }
+        if (apiResponse.has("meta_description")) {
+            seo.put("description", apiResponse.optString("meta_description"));
+        } else if (apiResponse.has("description")) {
+            seo.put("description", apiResponse.optString("description"));
+        }
 
-        // Variants
-//        if (apiResponse.has("sku")) {
-//            Map<String, Object> variant = new HashMap<>();
-//            variant.put("sku", apiResponse.optString("sku"));
-//            if (apiResponse.has("price")) {
-//                response.put("price", apiResponse.optDouble("price", 0.0));
-//            }
-//            response.put("variants", Collections.singletonList(variant));
-//        }
+        response.put("seo", seo);
 
         return response;
     }
@@ -754,12 +792,11 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "having_down_360", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "having_front_360", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "default_view", "single_line_text_field");
-        addMetafield(processedMetafields, rawMetafields, "filter", "multi_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "meta_keyword", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "upc", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "product_type_id", "number_integer");
         addMetafield(processedMetafields, rawMetafields, "diamond_selection", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "view_360", "single_line_text_field");
-        addMetafield(processedMetafields, rawMetafields, "product_price_str", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "having_modal_image_single", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "having_image_view_single", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "having_carat_single", "multi_line_text_field");
@@ -768,17 +805,84 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "product_id", "number_integer", "open_cart_product_id");
         addMetafield(processedMetafields, rawMetafields, "product_options", "json", "option_json");
 
+        addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "sort_order", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "viewed", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "sold", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "delivery_days", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "multistone", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "rrp", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "setting_code", "single_line_text_field");
+
+        addMetafield(processedMetafields, rawMetafields, "filter", "multi_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "model", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "single_image", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "image", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "title_logic", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "default_stone", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "rtr_sample_text", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "rtr_hide_options", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "rtr", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "design", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "model_sizes", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "how_it_fits_type", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "how_it_fits", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "single", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "best_seller", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "single_image_counter", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "option_shape", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "option_stone", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "weight", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "option_metal_wt", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "date_added", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "product_markup", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "gemstone", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "bandwidth", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "stonetype_display", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "carat_slider", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "carat_range", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "discount", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "markup", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "keyword", "single_line_text_field");
+
         // Special metafields requiring processing
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "metal", this::getMetalIds);
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "stone_type", this::getStoneTypeIds);
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "shape", this::getShapeIds);
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "backing", this::getBackingIds);
-//        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "carat", this::getCaratIds);
+//      Setting Type
         addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "setting_type", this::getSettingTypeIds);
+//      Colour
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "colour", this::getColourIds);
+//      Metal
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "metal", this::getMetalIds);
+//      Certificate
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "certificate", this::getCertificateIds);
+//      Clarity
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "clarity", this::getClarityIds);
+//        Shape
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "shape", this::getShapeIds);
+//        Ring Size
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "ring_size", this::getRingSizeIds);
+//        By Occasion
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "by_occasion", this::getOccasionIds);
+//        Personalised
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "personalised", this::getPersonalisedIds);
+//        By Recipient
         addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "by_recipient", this::getRecipientIds);
+//        Carat
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "carat", this::getCaratIds);
+//        Band Width
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "band_width", this::getBandWidthIds);
+//        Stone type
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "stone_type", this::getStoneTypeIds);
+//        Style Product
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "style_product", this::getStyleProductIds);
+//        Category
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "category", this::getCategoryIds);
+
+//        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "backing", this::getBackingIds);
 
         return processedMetafields;
     }
+
 
     private void addMetafield(List<JSONObject> metafields, JSONObject rawMetafields, String key, String type) {
         addMetafield(metafields, rawMetafields, key, type, key);
@@ -789,10 +893,17 @@ public class ProductMigrationService {
         if (rawMetafields.has(key) && !rawMetafields.isNull(key)) {
             logger.info("checking success for meta fields :: {}", key);
             JSONObject metafield = new JSONObject();
+
+            Object value = rawMetafields.get(key);
+
+            if (key.equals("image") || key.equals("single_image")) {
+                value = value.toString().replace("/", "_");
+            }
+
             metafield.put("namespace", "custom");
             metafield.put("key", metafieldKey);
             metafield.put("type", type);
-            metafield.put("value", rawMetafields.get(key));
+            metafield.put("value", value);
             metafields.add(metafield);
         }
     }
@@ -836,8 +947,8 @@ public class ProductMigrationService {
 
     private List<String> getShapeIds(Object productOptions) {
         try {
-            List<String> names = extractOptionNames(productOptions, "shape");
-            logger.info("extracted shape names :: {}", names);
+            List<String> names = extractNamesByFilterGroupId(productOptions, "4");
+            logger.info("extract shape names :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
                 if (shapeMap.containsKey(name)) {
@@ -852,7 +963,7 @@ public class ProductMigrationService {
 
     private List<String> getStoneTypeIds(Object productOptions) {
         try {
-            List<String> names = extractOptionNames(productOptions, "stone_type");
+            List<String> names = extractNamesByFilterGroupId(productOptions, "3");
             logger.info("extract stone type :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -868,7 +979,7 @@ public class ProductMigrationService {
 
     private List<String> getMetalIds(Object productOptions) {
         try {
-            List<String> names = extractOptionNames(productOptions, "metal");
+            List<String> names = extractNamesByFilterGroupId(productOptions, "1");
             logger.info("extract metal :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -882,15 +993,14 @@ public class ProductMigrationService {
         }
     }
 
-    private Object getBackingIds(Object backing) {
+    private List<String> getCategoryIds(Object o) {
         try {
-            logger.info("inside get backing ids");
-            List<String> names = extractOptionNames(backing, "backing");
-            logger.info("extract backing :: {}", names);
+            List<String> names = extractNamesByFilterGroupId(o, "10");
+            logger.info("extract category :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
-                if (backingMap.containsKey(name)) {
-                    ids.add(backingMap.get(name));
+                if (categoryMap.containsKey(name)) {
+                    ids.add(categoryMap.get(name));
                 }
             }
             return ids;
@@ -899,50 +1009,166 @@ public class ProductMigrationService {
         }
     }
 
-    public List<String> extractBackingNames(Object json) {
-        List<String> names = new ArrayList<>();
-        logger.info("inside extract backing names");
+    private List<String> getStyleProductIds(Object o) {
         try {
-            JsonNode rootNode = objectMapper.readTree(json.toString());
-
-            logger.info("Extracting backing names from JSON: {}", rootNode.toPrettyString());
-
-            // Ensure the root node is an array
-            if (!rootNode.isArray()) {
-                logger.warn("JSON root is not an array. Expected an array of backing objects.");
-                return names;
-            }
-
-            // Iterate over each backing object
-            for (JsonNode backing : rootNode) {
-                if (backing.has("product_option_value")) {
-                    JsonNode valuesNode = backing.get("product_option_value");
-
-                    if (valuesNode.isObject()) {
-                        // Iterate over each nested object (keys like "1", "2", "3")
-                        Iterator<JsonNode> elements = valuesNode.elements();
-                        while (elements.hasNext()) {
-                            JsonNode item = elements.next();
-                            if (item.has("name") && !item.get("name").isNull()) {
-                                String name = item.get("name").asText();
-                                logger.info("Found name: {}", name);
-                                names.add(name);
-                            }
-                        }
-                    } else {
-                        logger.warn("'product_option_value' is not a JSON object.");
-                    }
-                } else {
-                    logger.warn("'product_option_value' key is missing.");
+            List<String> names = extractNamesByFilterGroupId(o, "5");
+            logger.info("extract style product :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (styleProductMap.containsKey(name)) {
+                    ids.add(styleProductMap.get(name));
                 }
             }
-
+            return ids;
         } catch (Exception e) {
-            logger.error("Error extracting backing names: {}", e.getMessage(), e);
+            return new ArrayList<>();
         }
-
-        return names;
     }
+
+    private List<String> getBandWidthIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "11");
+            logger.info("extract band width :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (bandWidthMap.containsKey(name)) {
+                    ids.add(bandWidthMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getPersonalisedIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "9");
+            logger.info("extract personalized :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (personilizationMap.containsKey(name)) {
+                    ids.add(personilizationMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getCaratIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "17");
+            logger.info("extract carat :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (caratMap.containsKey(name)) {
+                    ids.add(caratMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getOccasionIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "7");
+            logger.info("extract occasion :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (occasionMap.containsKey(name)) {
+                    ids.add(occasionMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getRingSizeIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "16");
+            logger.info("extract ring size :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (ringSizeMap.containsKey(name)) {
+                    ids.add(ringSizeMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getClarityIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "14");
+            logger.info("extract clarity :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (clarityMap.containsKey(name)) {
+                    ids.add(clarityMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getCertificateIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "15");
+            logger.info("extract certificate :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (certificateMap.containsKey(name)) {
+                    ids.add(certificateMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private List<String> getColourIds(Object o) {
+        try {
+            List<String> names = extractNamesByFilterGroupId(o, "2");
+            logger.info("extract colour :: {}", names);
+            List<String> ids = new ArrayList<>();
+            for (String name : names) {
+                if (colourMap.containsKey(name)) {
+                    ids.add(colourMap.get(name));
+                }
+            }
+            return ids;
+        } catch (Exception e) {
+            return new ArrayList<>();
+        }
+    }
+
+//    private Object getBackingIds(Object backing) {
+//        try {
+//            logger.info("inside get backing ids");
+//            List<String> names = extractOptionNames(backing, "backing");
+//            logger.info("extract backing :: {}", names);
+//            List<String> ids = new ArrayList<>();
+//            for (String name : names) {
+//                if (backingMap.containsKey(name)) {
+//                    ids.add(backingMap.get(name));
+//                }
+//            }
+//            return ids;
+//        } catch (Exception e) {
+//            return new ArrayList<>();
+//        }
+//    }
 
     public List<String> extractOptionNames(Object json, String optionKey) {
         List<String> names = new ArrayList<>();
