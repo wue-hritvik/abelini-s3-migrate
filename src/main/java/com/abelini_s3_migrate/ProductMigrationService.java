@@ -41,6 +41,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -97,16 +98,17 @@ public class ProductMigrationService {
 
     private final String GRAPHQL_QUERY_METAOBJECT = """
                 query GetAllMetaobjects($type: String!) {
-                  metaobjects(type: $type, first: 250) {
-                    edges {
-                      node {
-                        id
-                        field(key: "name") {
-                          value
-                        }
-                      }
-                    }
-                  }
+                 metaobjects(type: $type, first: 250) {
+                       edges {
+                         node {
+                           id
+                           fields {
+                             key
+                             value
+                           }
+                         }
+                       }
+                     }
                 }
             """;
 
@@ -148,9 +150,21 @@ public class ProductMigrationService {
 
             for (JsonNode edge : edges) {
                 String id = edge.path("node").path("id").asText();
-                String name = edge.path("node").path("field").path("value").asText();
-                if (!name.isEmpty() && !id.isEmpty()) {
-                    result.put(name, id);
+                JsonNode fieldsNode = edge.path("node").path("fields");
+
+                // Dynamically extract the first valid field that is NOT `filter_id`
+                String key = "";
+                String value = "";
+
+                for (JsonNode field : fieldsNode) {
+                    key = field.path("key").asText();
+                    value = field.path("value").asText();
+
+                    // Ignore null values and `filter_id`
+                    if (!value.isEmpty() && !"filter_id".equals(key)) {
+                        result.put(value, id);
+                        break;  // Store only the first valid key-value pair per metaobject
+                    }
                 }
             }
 
@@ -369,7 +383,8 @@ public class ProductMigrationService {
     @Async
     public void processProducts(MultipartFile file, String singleId) {
         try {
-            logger.info("Starting product import... at:: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
+            String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Starting product import... at:: {}", startTime);
             List<String> ids = new ArrayList<>();
 
             if (!singleId.equals("0")) {
@@ -403,8 +418,6 @@ public class ProductMigrationService {
 
                     Map<String, Object> data = processResponse(apiResponse);
 
-//                String mutation = buildProductCreateMutation(data);
-
                     regulateApiRate();
                     remainingPoints.addAndGet(-API_COST_PER_CALL);
 
@@ -436,14 +449,14 @@ public class ProductMigrationService {
                     logger.info("Product created successfully for product id: " + id);
                     totalSuccess.incrementAndGet();
 
-                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, response != null, totalProcessed.get(), totalCount);
+                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, true, totalProcessed.get(), totalCount);
                 } catch (Exception e) {
                     totalFailed.incrementAndGet();
                     logger.error("error in product create for id :: {} :: {}", id, e.getMessage(), e);
                 }
             }
 
-            logger.info("Import process complete with total processed :: {}/{} with success: {}, failed: {} and ended at :: {}", totalProcessed.get(), totalCount, totalSuccess.get(), totalFailed.get(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
+            logger.info("Import process complete with total processed :: {}/{} with success: {}, failed: {} and started at :: {} and ended at :: {}", totalProcessed.get(), totalCount, totalSuccess.get(), totalFailed.get(), startTime, ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
         } catch (Exception e) {
             logger.error("error in process product :: {}", e.getMessage(), e);
@@ -807,6 +820,7 @@ public class ProductMigrationService {
 
         addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "quantity", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "sort_order", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "viewed", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "sold", "single_line_text_field");
@@ -848,35 +862,35 @@ public class ProductMigrationService {
 
         // Special metafields requiring processing
 //      Setting Type
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "setting_type", this::getSettingTypeIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "setting_type", this::getSettingTypeIds);
 //      Colour
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "colour", this::getColourIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "colour", this::getColourIds);
 //      Metal
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "metal", this::getMetalIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "metal", this::getMetalIds);
 //      Certificate
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "certificate", this::getCertificateIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "certificate", this::getCertificateIds);
 //      Clarity
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "clarity", this::getClarityIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "clarity", this::getClarityIds);
 //        Shape
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "shape", this::getShapeIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "shape", this::getShapeIds);
 //        Ring Size
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "ring_size", this::getRingSizeIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "ring_size", this::getRingSizeIds);
 //        By Occasion
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "by_occasion", this::getOccasionIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "by_occasion", this::getOccasionIds);
 //        Personalised
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "personalised", this::getPersonalisedIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "personalised", this::getPersonalisedIds);
 //        By Recipient
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "by_recipient", this::getRecipientIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "by_recipient", this::getRecipientIds);
 //        Carat
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "list.metaobject_reference", "carat", this::getCaratIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_options", "product_options", "list.metaobject_reference", "carat", this::getCaratIds);
 //        Band Width
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "band_width", this::getBandWidthIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "band_width", this::getBandWidthIds);
 //        Stone type
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "stone_type", this::getStoneTypeIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "stone_type", this::getStoneTypeIds);
 //        Style Product
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "style_product", this::getStyleProductIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "style_product", this::getStyleProductIds);
 //        Category
-        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "category", this::getCategoryIds);
+        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "product_options", "list.metaobject_reference", "category", this::getCategoryIds);
 
 //        addProcessedMetafield(processedMetafields, rawMetafields, "product_filters", "list.metaobject_reference", "backing", this::getBackingIds);
 
@@ -908,21 +922,26 @@ public class ProductMigrationService {
         }
     }
 
-    private void addProcessedMetafield(List<JSONObject> metafields, JSONObject rawMetafields, String key, String type, String metafieldKey, Function<Object, Object> processor) throws JsonProcessingException {
-        logger.info("checking for processed meta fields :: {}", key);
-        if (rawMetafields.has(key) && !rawMetafields.isNull(key)) {
-            logger.info("checking for success processed meta fields :: {}", key);
+    private void addProcessedMetafield(List<JSONObject> metafields, JSONObject rawMetafields, String key, String option, String type, String metafieldKey, BiFunction<Object, Object, Object> processor) throws JsonProcessingException {
+        logger.info("checking for processed meta fields :: {} :: {}", key, option);
+        if (rawMetafields.has(key) && !rawMetafields.isNull(key) &&
+                rawMetafields.has(option) && !rawMetafields.isNull(option)) {
+            logger.info("checking for success processed meta fields :: {} :: {}", key, option);
             JSONObject metafield = new JSONObject();
             metafield.put("namespace", "custom");
             metafield.put("key", metafieldKey);
             metafield.put("type", type);
-            metafield.put("value", processor.apply(rawMetafields.get(key)));
+            metafield.put("value", processor.apply(rawMetafields.get(key), rawMetafields.get(option)));
             metafields.add(metafield);
         }
     }
 
-    private List<String> getRecipientIds(Object productOptions) {
-        List<String> names = extractNamesByFilterGroupId(productOptions, "8");
+    private List<String> getRecipientIds(Object o, Object productOptions) {
+        Set<String> names = new HashSet<>();
+        List<String> filterNames = extractNamesByFilterGroupId(o, "8");
+        List<String> optionNames = extractOptionNames(productOptions, "by_recipient");
+        names.addAll(filterNames);
+        names.addAll(optionNames);
         logger.info("extract recipient :: {}", names);
         List<String> ids = new ArrayList<>();
         for (String name : names) {
@@ -933,8 +952,12 @@ public class ProductMigrationService {
         return ids;
     }
 
-    private List<String> getSettingTypeIds(Object productOptions) {
-        List<String> names = extractNamesByFilterGroupId(productOptions, "6");
+    private List<String> getSettingTypeIds(Object o, Object productOptions) {
+        Set<String> names = new HashSet<>();
+        List<String> filterNames = extractNamesByFilterGroupId(o, "6");
+        List<String> optionNames = extractOptionNames(productOptions, "setting_type");
+        names.addAll(filterNames);
+        names.addAll(optionNames);
         logger.info("extract setting type :: {}", names);
         List<String> ids = new ArrayList<>();
         for (String name : names) {
@@ -945,9 +968,13 @@ public class ProductMigrationService {
         return ids;
     }
 
-    private List<String> getShapeIds(Object productOptions) {
+    private List<String> getShapeIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(productOptions, "4");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "4");
+            List<String> optionNames = extractOptionNames(productOptions, "shape");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract shape names :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -961,9 +988,14 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getStoneTypeIds(Object productOptions) {
+    private List<String> getStoneTypeIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(productOptions, "3");
+            Set<String> names = new HashSet<>();
+
+            List<String> filterNames = extractNamesByFilterGroupId(o, "3");
+            List<String> optionNames = extractOptionNames(productOptions, "stone_type");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract stone type :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -977,9 +1009,14 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getMetalIds(Object productOptions) {
+    private List<String> getMetalIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(productOptions, "1");
+            Set<String> names = new HashSet<>();
+
+            List<String> filterNames = extractNamesByFilterGroupId(o, "1");
+            List<String> optionNames = extractOptionNames(productOptions, "metal");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract metal :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -993,9 +1030,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getCategoryIds(Object o) {
+    private List<String> getCategoryIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "10");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "10");
+            List<String> optionNames = extractOptionNames(productOptions, "category");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract category :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1009,9 +1050,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getStyleProductIds(Object o) {
+    private List<String> getStyleProductIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "5");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "5");
+            List<String> optionNames = extractOptionNames(productOptions, "style");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract style product :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1025,9 +1070,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getBandWidthIds(Object o) {
+    private List<String> getBandWidthIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "11");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "11");
+            List<String> optionNames = extractOptionNames(productOptions, "band_width");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract band width :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1041,9 +1090,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getPersonalisedIds(Object o) {
+    private List<String> getPersonalisedIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "9");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "9");
+            List<String> optionNames = extractOptionNames(productOptions, "personalised");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract personalized :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1057,9 +1110,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getCaratIds(Object o) {
+    private List<String> getCaratIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "17");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "17");
+            List<String> optionNames = extractOptionNames(productOptions, "carat");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract carat :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1073,9 +1130,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getOccasionIds(Object o) {
+    private List<String> getOccasionIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "7");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "7");
+            List<String> optionNames = extractOptionNames(productOptions, "by_occasion");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract occasion :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1089,9 +1150,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getRingSizeIds(Object o) {
+    private List<String> getRingSizeIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "16");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "16");
+            List<String> optionNames = extractOptionNames(productOptions, "ring_size");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract ring size :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1105,9 +1170,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getClarityIds(Object o) {
+    private List<String> getClarityIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "14");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "14");
+            List<String> optionNames = extractOptionNames(productOptions, "clarity");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract clarity :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1121,9 +1190,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getCertificateIds(Object o) {
+    private List<String> getCertificateIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "15");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "15");
+            List<String> optionNames = extractOptionNames(productOptions, "certificate");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract certificate :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
@@ -1137,9 +1210,13 @@ public class ProductMigrationService {
         }
     }
 
-    private List<String> getColourIds(Object o) {
+    private List<String> getColourIds(Object o, Object productOptions) {
         try {
-            List<String> names = extractNamesByFilterGroupId(o, "2");
+            Set<String> names = new HashSet<>();
+            List<String> filterNames = extractNamesByFilterGroupId(o, "2");
+            List<String> optionNames = extractOptionNames(productOptions, "color");
+            names.addAll(filterNames);
+            names.addAll(optionNames);
             logger.info("extract colour :: {}", names);
             List<String> ids = new ArrayList<>();
             for (String name : names) {
