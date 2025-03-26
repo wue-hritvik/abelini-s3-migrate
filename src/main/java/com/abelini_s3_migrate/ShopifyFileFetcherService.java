@@ -91,7 +91,7 @@ public class ShopifyFileFetcherService {
 
             String query = """
                     {
-                      files(first: 250, query: "created_at:>=2025-03-25"%s) {
+                      files(first: 250, query: "filename:'*.mp4'"%s) {
                         edges {
                           node {
                             alt
