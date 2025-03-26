@@ -37,12 +37,12 @@ public class ShopifyFileFetcherService {
     @Value("${shopify_access_token}")
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
-    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_04-03.csv";
-    private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_export_04-03.csv";
+    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_26-03.csv";
+    private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_export_26-03.csv";
     private static final int API_COST_PER_CALL = 35;
     private static final int MAX_POINTS = 20000;
     private static final int RECOVERY_RATE = 1000;
-    private static final int SAFE_THRESHOLD = 1000;
+    private static final int SAFE_THRESHOLD = 2000;
     private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
     private static final AtomicInteger totalFilesStored = new AtomicInteger(0);
     private static final AtomicInteger batchNumber = new AtomicInteger(1); // AtomicInteger for thread-safe batch number
@@ -50,6 +50,7 @@ public class ShopifyFileFetcherService {
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(ShopifyFileFetcherService.class);
     private final RestTemplate restTemplate = new RestTemplate();
     private final ThreadPoolTaskExecutor taskExecutor;
+    private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
 
     public ShopifyFileFetcherService(ThreadPoolTaskExecutor taskExecutor) {
         this.taskExecutor = taskExecutor = new ThreadPoolTaskExecutor();
@@ -57,6 +58,15 @@ public class ShopifyFileFetcherService {
         taskExecutor.setMaxPoolSize(20);
         taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         taskExecutor.initialize();
+
+        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
+            int currentPoints = remainingPoints.get();
+            if (currentPoints < MAX_POINTS) {
+                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
+                remainingPoints.addAndGet(newPoints);
+                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
+            }
+        }, 1, 1, TimeUnit.SECONDS);
     }
 
     @Async
@@ -81,7 +91,7 @@ public class ShopifyFileFetcherService {
 
             String query = """
                     {
-                      files(first: 250, query: "created_at:>=2025-02-24"%s) {
+                      files(first: 250, query: "created_at:>=2025-03-25"%s) {
                         edges {
                           node {
                             alt
@@ -225,15 +235,22 @@ public class ShopifyFileFetcherService {
     }
 
     private void regulateApiRate() {
-        if (remainingPoints.get() < SAFE_THRESHOLD) {
-            int waitTime = Math.min(5, (MAX_POINTS - remainingPoints.get()) / RECOVERY_RATE);
-            LOGGER.info("Low API points (" + remainingPoints.get() + "), pausing for " + waitTime + " seconds to recover.");
+        int maxWaitTime = 10; // Maximum wait time in seconds
+        int waitTime = 0;
+
+        while (remainingPoints.get() < SAFE_THRESHOLD) {
+            if (waitTime >= maxWaitTime) {
+                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
+                break;
+            }
+            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
             try {
-                TimeUnit.SECONDS.sleep(waitTime);
+                Thread.sleep(1000); // Wait 1 second for recovery
+                waitTime++;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                break;
             }
-            remainingPoints.addAndGet(waitTime * RECOVERY_RATE);  // Thread-safe increment
         }
     }
 
@@ -245,7 +262,7 @@ public class ShopifyFileFetcherService {
         String mutation = """
                 mutation {
                   bulkOperationRunQuery(
-                    query: "{ files(query: \\"created_at:>=2025-02-24\\") { edges { node { preview { image { altText } } } } } }"
+                    query: "{ files(query: \\"created_at:>=2025-03-25\\") { edges { node { preview { image { altText } } } } } }"
                   ) {
                     bulkOperation {
                       id
@@ -461,9 +478,9 @@ public class ShopifyFileFetcherService {
         }
     }
 
-    private static final String S3_CSV_PATH = "src/main/resources/s3file/xlarge_1_26.csv";
-    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_04-03.csv";
-    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_xlarge_04_03.csv";
+    private static final String S3_CSV_PATH = "src/main/resources/s3file/missing_avif_mp4_04_03";
+    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_26-03.csv";
+    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_links_26-03.csv";
     private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
     private static final String IMAGE_FILES_CSV = "src/main/resources/s3file/image_s3_urls.csv";
 
