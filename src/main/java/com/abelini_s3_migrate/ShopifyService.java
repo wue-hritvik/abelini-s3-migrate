@@ -47,10 +47,6 @@ public class ShopifyService {
     private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2025-01/graphql.json";
     private final String SHOPIFY_ACCESS_TOKEN = accessToken;
 
-    public ShopifyService(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
-    }
-
     private List<String> readCSV(String filePath) throws IOException, CsvException {
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
             List<String[]> records = reader.readAll();
@@ -66,8 +62,22 @@ public class ShopifyService {
     private static final int API_COST_PER_CALL = 40;
     private static final int MAX_POINTS = 20000;
     private static final int RECOVERY_RATE = 1000;
-    private static final int SAFE_THRESHOLD = 1000;
+    private static final int SAFE_THRESHOLD = 2000;
     private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
+
+    private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
+
+    public ShopifyService(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
+            int currentPoints = remainingPoints.get();
+            if (currentPoints < MAX_POINTS) {
+                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
+                remainingPoints.addAndGet(newPoints);
+                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+    }
 
     @Async
     public void uploadImagesToShopify(String csvFilePath) throws IOException, CsvException {
@@ -87,81 +97,88 @@ public class ShopifyService {
             final int batchNumber = (i / batchSize) + 1;
             final List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
             logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
-//            futures.add(executorService.submit(() -> {
-//                try {
-//                    semaphore.acquire();
-//                    regulateApiRate();
-//                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
-//                    remainingPoints.addAndGet(-API_COST_PER_CALL);
-//                    int count = registerBatchInShopify(batch);
-//
-//                    int processed = totalProcessed.addAndGet(count);
-//                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, processed, imageUrls.size());
-//                } catch (Exception e) {
-//                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-//                } finally {
-//                    semaphore.release();
-//                }
-//            }));
-
-//        }
-
-//        for (Future<?> future : futures) {
-//            try {
-//                future.get();
-//            } catch (InterruptedException | ExecutionException e) {
-//                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
-//            }
-//        }
-//
-//        executorService.shutdown();
-//        try {
-//            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
-//                logger.warn("Executor did not terminate in the specified time.");
-//                executorService.shutdownNow();
-//                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
-//                    logger.error("Executor did not terminate after forced shutdown.");
-//                }
-//            } else {
-//                logger.info("All batches completed successfully within 5 minutes.");
-//            }
-//        } catch (InterruptedException e) {
-//            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
-//            executorService.shutdownNow();
-//            Thread.currentThread().interrupt();
-//        }
-            try {
-                regulateApiRate();
-                remainingPoints.addAndGet(-API_COST_PER_CALL);
-                int count = registerBatchInShopify(batch);
-                totalProcessed.addAndGet(count);
-                logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, totalProcessed.get(), imageUrls.size());
-            } catch (Exception e) {
-                logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-            }
-
-            if (i + batchSize < imageUrls.size()) {
-                logger.info("Waiting for 1 second before next batch...");
+            futures.add(executorService.submit(() -> {
                 try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    semaphore.acquire();
+                    regulateApiRate();
+                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
+                    remainingPoints.addAndGet(-API_COST_PER_CALL);
+                    int count = registerBatchInShopify(batch);
+
+                    int processed = totalProcessed.addAndGet(count);
+                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, processed, imageUrls.size());
+                } catch (Exception e) {
+                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+                } finally {
+                    semaphore.release();
                 }
+            }));
+
+        }
+
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
             }
         }
+
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
+                logger.warn("Executor did not terminate in the specified time.");
+                executorService.shutdownNow();
+                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+                    logger.error("Executor did not terminate after forced shutdown.");
+                }
+            } else {
+                logger.info("All batches completed successfully within 5 minutes.");
+            }
+        } catch (InterruptedException e) {
+            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+//            try {
+//                regulateApiRate();
+//                remainingPoints.addAndGet(-API_COST_PER_CALL);
+//                int count = registerBatchInShopify(batch);
+//                totalProcessed.addAndGet(count);
+//                logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, totalProcessed.get(), imageUrls.size());
+//            } catch (Exception e) {
+//                logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+//            }
+//
+//            if (i + batchSize < imageUrls.size()) {
+//                logger.info("Waiting for 1 second before next batch...");
+//                try {
+//                    Thread.sleep(1000);
+//                } catch (InterruptedException e) {
+//                    Thread.currentThread().interrupt();
+//                }
+//            }
+//        }
         logger.info("Bulk upload completed. Total images processed: {}, ended at :: {}", totalProcessed.get(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
     }
 
     private void regulateApiRate() {
-        if (remainingPoints.get() < SAFE_THRESHOLD) {
-            int waitTime = Math.min(5, (MAX_POINTS - remainingPoints.get()) / RECOVERY_RATE);
-            logger.info("Low API points (" + remainingPoints.get() + "), pausing for " + waitTime + " seconds to recover.");
+        int maxWaitTime = 10; // Maximum wait time in seconds
+        int waitTime = 0;
+
+        while (remainingPoints.get() < SAFE_THRESHOLD) {
+            if (waitTime >= maxWaitTime) {
+                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
+                break;
+            }
+            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
             try {
-                TimeUnit.SECONDS.sleep(waitTime);
+                Thread.sleep(1000); // Wait 1 second for recovery
+                waitTime++;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                break;
             }
-            remainingPoints.addAndGet(waitTime * RECOVERY_RATE);  // Thread-safe increment
         }
     }
 
