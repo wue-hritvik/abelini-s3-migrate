@@ -478,7 +478,7 @@ public class ShopifyFileFetcherService {
         }
     }
 
-    private static final String S3_CSV_PATH = "src/main/resources/s3file/missing_avif_mp4_04_03";
+    private static final String S3_CSV_PATH = "src/main/resources/s3file/missing_avif_mp4_04_03.csv";
     private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_26-03.csv";
     private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_links_26-03.csv";
     private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
