@@ -5,9 +5,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
-import com.google.gson.reflect.TypeToken;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
 import jakarta.annotation.PostConstruct;
@@ -17,14 +14,14 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.ResponseEntity;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
@@ -36,13 +33,10 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -56,6 +50,7 @@ public class ProductMigrationService {
     private String accessToken;
 
     private final ProductIdsRepository productIdsRepository;
+    private final ProductVarientIdsRepository productVarientIdsRepository;
 
     private final Gson gson = new Gson();
     private final RestTemplate restTemplate = new RestTemplate();
@@ -64,25 +59,43 @@ public class ProductMigrationService {
     private static final int MAX_CONCURRENT_BATCHES = 5;
     private static final Semaphore semaphore = new Semaphore(MAX_CONCURRENT_BATCHES);
     private static final int API_COST_PER_CALL = 40;
-    private static final int MAX_POINTS = 19000;
+    private static final int MAX_POINTS = 20000;
     private static final int RECOVERY_RATE = 1000;
-    private static final int SAFE_THRESHOLD = 1000;
+    private static final int SAFE_THRESHOLD = 2000;
     private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
 
-    public ProductMigrationService(ProductIdsRepository productIdsRepository) {
+    private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
+
+    public ProductMigrationService(ProductIdsRepository productIdsRepository, ProductVarientIdsRepository productVarientIdsRepository) {
         this.productIdsRepository = productIdsRepository;
+        this.productVarientIdsRepository = productVarientIdsRepository;
+        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
+            int currentPoints = remainingPoints.get();
+            if (currentPoints < MAX_POINTS) {
+                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
+                remainingPoints.addAndGet(newPoints);
+                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
+            }
+        }, 1, 1, TimeUnit.SECONDS);
     }
 
     private void regulateApiRate() {
-        if (remainingPoints.get() < SAFE_THRESHOLD) {
-            int waitTime = Math.min(5, (MAX_POINTS - remainingPoints.get()) / RECOVERY_RATE);
-            logger.info("Low API points (" + remainingPoints.get() + "), pausing for " + waitTime + " seconds to recover.");
+        int maxWaitTime = 10; // Maximum wait time in seconds
+        int waitTime = 0;
+
+        while (remainingPoints.get() < SAFE_THRESHOLD) {
+            if (waitTime >= maxWaitTime) {
+                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
+                break;
+            }
+            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
             try {
-                TimeUnit.SECONDS.sleep(waitTime);
+                Thread.sleep(1000); // Wait 1 second for recovery
+                waitTime++;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                break;
             }
-            remainingPoints.addAndGet(waitTime * RECOVERY_RATE);  // Thread-safe increment
         }
     }
 
@@ -376,16 +389,15 @@ public class ProductMigrationService {
         }
     }
 
-    private final AtomicInteger totalProcessed = new AtomicInteger(0);
-    private final AtomicInteger totalSuccess = new AtomicInteger(0);
-    private final AtomicInteger totalFailed = new AtomicInteger(0);
-
     @Async
     public void processProducts(MultipartFile file, String singleId) {
         try {
             String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting product import... at:: {}", startTime);
             List<String> ids = new ArrayList<>();
+            AtomicInteger totalProcessed = new AtomicInteger(0);
+            AtomicInteger totalSuccess = new AtomicInteger(0);
+            AtomicInteger totalFailed = new AtomicInteger(0);
 
             if (!singleId.equals("0")) {
                 ids.add(singleId);
@@ -817,6 +829,9 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "product_minimum_price", "json", "minimum_price_json");
         addMetafield(processedMetafields, rawMetafields, "product_id", "number_integer", "open_cart_product_id");
         addMetafield(processedMetafields, rawMetafields, "product_options", "json", "option_json");
+
+        addMetafield(processedMetafields, rawMetafields, "having_stone_type", "multi_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "having_stone_shape", "multi_line_text_field");
 
         addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
@@ -1293,23 +1308,18 @@ public class ProductMigrationService {
 
             logger.info("Extracting names for filter_group_id: {} :: {}", targetFilterGroupId, rootNode.toPrettyString());
 
-            // Ensure the root node is an array
-            if (!rootNode.isArray()) {
-                logger.warn("JSON root is not an array. Expected an array of filter objects.");
-                return names;
-            }
-
-            // Iterate over each filter object
-            for (JsonNode filter : rootNode) {
-                if (filter.has("filter_group_id") && filter.has("name")) {
-                    String filterGroupId = filter.get("filter_group_id").asText();
-
-                    if (targetFilterGroupId.equals(filterGroupId)) {
-                        String name = filter.get("name").asText();
-                        logger.info("Found name: {}", name);
-                        names.add(name);
-                    }
+            if (rootNode.isArray()) {
+                // Process JSON if it's an array
+                for (JsonNode filter : rootNode) {
+                    processFilterNode(filter, targetFilterGroupId, names);
                 }
+            } else if (rootNode.isObject()) {
+                // Process JSON if it's an object
+                for (JsonNode filter : rootNode) {
+                    processFilterNode(filter, targetFilterGroupId, names);
+                }
+            } else {
+                logger.warn("Unexpected JSON structure. Expected an array or object.");
             }
 
         } catch (Exception e) {
@@ -1317,6 +1327,18 @@ public class ProductMigrationService {
         }
 
         return names;
+    }
+
+    private void processFilterNode(JsonNode filter, String targetFilterGroupId, List<String> names) {
+        if (filter.has("filter_group_id") && filter.has("name")) {
+            String filterGroupId = filter.get("filter_group_id").asText();
+
+            if (targetFilterGroupId.equals(filterGroupId)) {
+                String name = filter.get("name").asText();
+                logger.info("Found name: {}", name);
+                names.add(name);
+            }
+        }
     }
 
 
@@ -1331,5 +1353,403 @@ public class ProductMigrationService {
         }
     }
 
+    private List<String> readCSVFromPath(String filePath) throws IOException, CsvException {
+        try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
+            List<String[]> records = reader.readAll();
+            return records.stream().skip(1) // Skip header row
+                    .map(row -> row[0])
+                    .collect(Collectors.toList());
+        }
+    }
 
+    public ResponseEntity<?> getMissingProducts() throws IOException, CsvException {
+        String filePath = "src/main/resources/s3file/active-products.csv";
+        List<String> ids = readCSVFromPath(filePath);
+
+        // Fetch all product IDs from the database
+        List<ProductIds> products = productIdsRepository.findAll();
+        Set<String> existingProductIds = products.stream()
+                .map(ProductIds::getProductId)
+                .collect(Collectors.toSet());
+
+        // Find missing IDs (present in CSV but not in DB)
+        List<String> missingIds = ids.stream()
+                .filter(id -> !existingProductIds.contains(id))
+                .collect(Collectors.toList());
+
+        // Return missing IDs
+        return ResponseEntity.ok(missingIds);
+    }
+
+    @Async
+    public void addProductsToCollection(String collectionId, List<String> productIdToShopifyId) {
+
+        logger.info("total product ids count ::{}", productIdToShopifyId.size());
+
+        int batchSize = 240;
+        int totalProcessed = 0;
+        int batchNumber = 0;
+
+        for (int i = 0; i < productIdToShopifyId.size(); i += batchSize) {
+            regulateApiRate();
+            remainingPoints.addAndGet(-API_COST_PER_CALL);
+            batchNumber++;
+            List<String> batch = productIdToShopifyId.subList(i, Math.min(i + batchSize, productIdToShopifyId.size()));
+            logger.info("Start Processing batch {} ({} - {}), Batch size: {}",
+                    batchNumber, i + 1, i + batch.size(), batch.size());
+
+            try {
+                processBatch(collectionId, batch);
+                totalProcessed += batch.size();
+                logger.info("Completed batch {}. Total processed so far: {}", batchNumber, totalProcessed);
+            } catch (Exception e) {
+                logger.info("error while processing batch {}", batchNumber);
+            }
+        }
+        logger.info("All batches processed. Total products added: {}", totalProcessed);
+        logger.info("Import product in collection process complete :: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
+    }
+
+    private void processBatch(String collectionId, List<String> batch) {
+        StringBuilder mutation = new StringBuilder();
+        mutation.append("mutation { collectionAddProducts(id: \"")
+                .append(collectionId)
+                .append("\", productIds: [");
+
+        for (String productGid : batch) {
+            mutation.append("\"").append(productGid).append("\", ");
+        }
+
+        if (!batch.isEmpty()) {
+            mutation.setLength(mutation.length() - 2);
+        }
+
+        mutation.append("]) { collection { id } userErrors { field message } } }");
+
+        logger.info("Generated Mutation: {}", mutation);
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("query", mutation.toString());
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Content-Type", "application/json");
+        headers.set("X-Shopify-Access-Token", accessToken);
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
+        ResponseEntity<String> response = restTemplate.postForEntity(shopifyStore + "/admin/api/2025-01/graphql.json", request, String.class);
+
+        logger.info("Shopify Response: {}", response.getBody());
+    }
+
+    @Async
+    public void productVarientMigration() {
+        try {
+            String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Starting product import at: {}", startTime);
+
+//            String firstApiUrl = "https://www.abelini.com/shopify/api/all_stock_product.php";
+//            ResponseEntity<List<Map<String, Object>>> firstApiResponse = restTemplate.exchange(
+//                    firstApiUrl,
+//                    HttpMethod.POST,
+//                    null,
+//                    new ParameterizedTypeReference<List<Map<String, Object>>>() {
+//                    }
+//            );
+//
+//            if (firstApiResponse.getStatusCode() != HttpStatus.OK || firstApiResponse.getBody() == null) {
+//                logger.error("Error fetching all stock products from Abelini API");
+//                return;
+//            }
+//
+//            long totalProductsVarient = firstApiResponse.getBody().size();
+//            Set<String> uniqueProductIds = firstApiResponse.getBody().stream()
+//                    .map(m -> m.get("product_id").toString())
+//                    .collect(Collectors.toSet());
+            long totalProductsVarient = 8;
+            Set<String> uniqueProductIds = Set.of("1228");
+
+            AtomicInteger totalProcessed = new AtomicInteger(0);
+            AtomicInteger totalVariants = new AtomicInteger(0);
+            AtomicInteger totalProductSuccess = new AtomicInteger(0);
+            AtomicInteger totalProductFailed = new AtomicInteger(0);
+            AtomicInteger totalVariantSuccess = new AtomicInteger(0);
+            AtomicInteger totalVariantFailed = new AtomicInteger(0);
+
+            logger.info("Total products varient: {}", totalProductsVarient);
+            logger.info("Unique product count: {}", uniqueProductIds.size());
+
+            for (String id : uniqueProductIds) {
+                try {
+                    totalProcessed.incrementAndGet();
+                    logger.info("Processing product ID: {}", id);
+                    JSONArray apiResponseArray = fetchProductVarientDetailsFromApi(id);
+
+                    if (apiResponseArray == null || apiResponseArray.isEmpty()) {
+                        logger.error("No variants found for product ID: {}", id);
+                        totalProductFailed.incrementAndGet();
+                        continue;
+                    }
+
+                    int variantCount = apiResponseArray.length();
+                    totalVariants.addAndGet(variantCount);
+                    AtomicInteger processedVariants = new AtomicInteger(0);
+
+                    for (int i = 0; i < apiResponseArray.length(); i++) {
+                        JSONObject apiResponse = apiResponseArray.getJSONObject(i);
+                        String tagNo = apiResponse.optString("tag_no", "N/A");
+                        logger.info("starting product id :: {}, varient tag no :: {}", id, tagNo);
+                        processedVariants.incrementAndGet();
+
+                        Map<String, Object> data = processResponse(apiResponse);
+                        regulateApiRate();
+                        remainingPoints.addAndGet(-API_COST_PER_CALL);
+
+                        Map<String, Object> product = new HashMap<>();
+                        product.put("product", data);
+                        String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_CREATE, objectMapper.writeValueAsString(product), false);
+
+                        if (response == null) {
+                            logger.error("Shopify response null for product ID: {}, tag_no: {}", id, tagNo);
+                            totalVariantFailed.incrementAndGet();
+                            continue;
+                        }
+
+                        Map<String, String> extractIds = extractProductIdAndVariendId(response);
+
+//                        ProductVarientIds pi = new ProductVarientIds();
+//                        pi.setProductId(id);
+//                        pi.setShopifyProductId(extractIds.get("product"));
+//                        pi.setTagNo(tagNo);
+//                        productVarientIdsRepository.save(pi);
+
+                        getBaseVarientAndSetSkuAndPrice2(extractIds.get("product"), apiResponse);
+                        List<JSONObject> metaFields = processMetafields(apiResponse);
+                        processApiResponseAndUploadMetafields(extractIds.get("product"), metaFields);
+
+                        logger.info("Successfully created variant for product ID: {}, tag_no: {}", id, tagNo);
+                        totalVariantSuccess.incrementAndGet();
+                    }
+
+                    if (processedVariants.get() > 0) {
+                        totalProductSuccess.incrementAndGet();
+                    }
+
+                    logger.info("Completed product ID: {} with {} variants processed", id, variantCount);
+                } catch (Exception e) {
+                    totalProductFailed.incrementAndGet();
+                    logger.error("Error processing product ID: {} :: {}", id, e.getMessage(), e);
+                }
+            }
+
+            String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+
+            logger.info("Import process complete! Products processed: {}/{}, Success: {}, Failed: {} | Variants processed: {}/{}, Success: {}, Failed: {} | Started at: {}, Ended at: {}",
+                    totalProcessed.get(), uniqueProductIds.size(), totalProductSuccess.get(), totalProductFailed.get(),
+                    totalVariants.get(), totalProductsVarient, totalVariantSuccess.get(), totalVariantFailed.get(), startTime, endTime);
+        } catch (Exception e) {
+            logger.error("Unexpected error in product migration: {}", e.getMessage(), e);
+        }
+    }
+
+    private JSONArray fetchProductVarientDetailsFromApi(String id) {
+        String url = "https://www.abelini.com/shopify/api/stock_product.php";
+        Map<String, String> request = new HashMap<>();
+        request.put("product_id", id);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Content-Type", "application/json");
+
+        HttpEntity<Map<String, String>> entity = new HttpEntity<>(request, headers);
+
+        String response = restTemplate.postForObject(url, entity, String.class);
+//        logger.info("api response :: {}", response);
+        try {
+            JSONArray jsonArray = new JSONArray(response);
+            if (!jsonArray.isEmpty()) {
+                return jsonArray;
+            } else {
+                logger.error("API returned an empty list for product ID: {}", id);
+                return null;
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to parse product details JSON: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void getBaseVarientAndSetSkuAndPrice2(String productId, JSONObject apiResponse) {
+        try {
+            // Step 1: Fetch Base Variant ID
+            String query = """
+                        query GetBaseVariant($productId: ID!) {
+                            product(id: $productId) {
+                                variants(first: 1) {
+                                    edges {
+                                        node {
+                                            id
+                                            sku
+                                            price
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    """;
+
+            Map<String, Object> variable = new HashMap<>();
+            variable.put("productId", productId);
+
+            String response = sendGraphQLRequest(query, objectMapper.writeValueAsString(variable), false);
+            if (response == null) {
+                logger.error("Failed to fetch base variant for product ID: {}", productId);
+                return;
+            }
+
+            JSONObject responseObj = new JSONObject(response);
+
+            // Extract base variant ID
+            JSONObject data = responseObj.optJSONObject("data");
+            if (data == null) {
+                logger.error("Invalid GraphQL response: 'data' is missing");
+                return;
+            }
+
+            JSONObject product = data.optJSONObject("product");
+            if (product == null) {
+                logger.warn("No product found for ID: {}", productId);
+                return;
+            }
+
+            JSONObject variants = product.optJSONObject("variants");
+            if (variants == null) {
+                logger.warn("No variants found for product ID: {}", productId);
+                return;
+            }
+
+            JSONArray edges = variants.optJSONArray("edges");
+            if (edges == null || edges.isEmpty()) {
+                logger.warn("No variant edges found for product ID: {}", productId);
+                return;
+            }
+
+            // Extract base variant
+            JSONObject baseVariant = edges.getJSONObject(0).optJSONObject("node");
+            if (baseVariant == null) {
+                logger.warn("Base variant node is missing for product ID: {}", productId);
+                return;
+            }
+
+            String variantId = baseVariant.optString("id", null);
+            if (variantId == null) {
+                logger.warn("Variant ID is missing for product ID: {}", productId);
+                return;
+            }
+
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("variantId", variantId);
+
+            if (apiResponse.has("sku")) {
+                variables.put("sku", apiResponse.optString("sku") + "_" + apiResponse.optString("tag_no"));
+            }
+
+            if (apiResponse.has("price")) {
+                String priceStr = String.format("%.2f", apiResponse.optDouble("price", 0.0)); // Ensure 2 decimal places
+                variables.put("price", new BigDecimal(priceStr));
+            }
+
+            // Correct Mutation
+            String mutation = """
+                    mutation UpdateVariant($variantId: ID!, $sku: String, $price: Money) {
+                      productVariantUpdate(input: { id: $variantId, sku: $sku, price: $price }) {
+                        productVariant {
+                          id
+                          sku
+                          price
+                        }
+                        userErrors {
+                          field
+                          message
+                        }
+                      }
+                    }
+                    """;
+
+            String updateResponse = sendGraphQLRequest(mutation, objectMapper.writeValueAsString(variables), true);
+            if (updateResponse == null) {
+                logger.error("Failed to update variant ID: {}", variantId);
+            }
+
+            logger.info("varient update successfully for product id: " + productId);
+
+        } catch (Exception e) {
+            logger.error("Error processing base variant update: {}", e.getMessage(), e);
+        }
+    }
+
+    @Async
+    public void importedProduct2FieldReUpload() {
+        try {
+            String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Starting product import at: {}", startTime);
+
+            AtomicInteger totalProcessed = new AtomicInteger(0);
+            AtomicInteger totalSuccess = new AtomicInteger(0);
+            AtomicInteger totalFailed = new AtomicInteger(0);
+
+            List<ProductIds> productIds = productIdsRepository.findAll();
+
+            if (productIds.isEmpty()) {
+                logger.error("no id found");
+                return;
+            }
+            long totalCount = productIds.size();
+
+            for (ProductIds product : productIds) {
+                totalProcessed.incrementAndGet();
+                String id = product.getProductId();
+                try {
+                    logger.info("Processing product id: " + id);
+                    JSONObject apiResponse = fetchProductDetailsFromApi(id);
+
+                    if (apiResponse == null || apiResponse.isEmpty()) {
+                        logger.error("null or empty error while creating product id: " + id);
+                        totalFailed.incrementAndGet();
+                        logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, false, totalProcessed.get(), totalCount);
+                        continue;
+                    }
+
+                    List<JSONObject> metaFields = process2Metafields(apiResponse);
+
+                    processApiResponseAndUploadMetafields(product.getShopifyProductId(), metaFields);
+
+                    logger.info("Product created successfully for product id: " + id);
+                    totalSuccess.incrementAndGet();
+
+                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, true, totalProcessed.get(), totalCount);
+                } catch (Exception e) {
+                    logger.error("Error processing product id :: {}", id);
+                }
+            }
+
+            String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Import 2 field process completed with total processed :: {}/{} with success: {}, failed: {} and started at :: {} and ended at :: {}",
+                    totalProcessed.get(), totalCount, totalSuccess.get(), totalFailed.get(),
+                    startTime, endTime);
+        } catch (Exception e) {
+            logger.error("Error processing the importedProduct2FieldReUpload : {}", e.getMessage(), e);
+        }
+    }
+
+    private List<JSONObject> process2Metafields(JSONObject rawMetafields) {
+        List<JSONObject> processedMetafields = new ArrayList<>();
+
+        addMetafield(processedMetafields, rawMetafields, "having_stone_type", "multi_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "having_stone_shape", "multi_line_text_field");
+
+        return processedMetafields;
+    }
 }

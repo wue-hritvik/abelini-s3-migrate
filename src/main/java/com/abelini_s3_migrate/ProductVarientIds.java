@@ -1,20 +1,26 @@
 package com.abelini_s3_migrate;
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
-import lombok.*;
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
 
 @Getter
 @Setter
 @Entity
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "product_ids")
-public class ProductIds {
+@Table(name = "product_Varient_ids")
+public class ProductVarientIds {
 
     @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
     private String productId;
+
+    private String tagNo;
 
     private String shopifyProductId;
 
@@ -35,6 +41,6 @@ public class ProductIds {
 
     @Override
     public String toString() {
-        return "ProductIds{productId='" + productId + "', shopifyProductId='" + shopifyProductId + "'}";
+        return "ProductIds{id='"+id+"', productId='" + productId + "', tagNo='" + tagNo + "', shopifyProductId='" + shopifyProductId + "'}";
     }
 }
