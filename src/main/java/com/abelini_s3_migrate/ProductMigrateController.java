@@ -87,4 +87,10 @@ public class ProductMigrateController {
         migrationService.importedProduct2FieldReUpload();
         return "Imported Product 2 Field ReUpload started successfully";
     }
+
+    @PostMapping("/imported-product-2-fields-re-upload/second-time")
+    public String importedProduct2FieldReUploadSecond() {
+        migrationService.importedProduct2FieldReUploadSecond();
+        return "Imported Product 2 Field second ReUpload started successfully";
+    }
 }

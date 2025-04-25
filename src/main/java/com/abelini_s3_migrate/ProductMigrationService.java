@@ -2,6 +2,7 @@ package com.abelini_s3_migrate;
 
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.Gson;
@@ -1448,26 +1449,30 @@ public class ProductMigrationService {
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting product import at: {}", startTime);
 
-//            String firstApiUrl = "https://www.abelini.com/shopify/api/all_stock_product.php";
-//            ResponseEntity<List<Map<String, Object>>> firstApiResponse = restTemplate.exchange(
-//                    firstApiUrl,
-//                    HttpMethod.POST,
-//                    null,
-//                    new ParameterizedTypeReference<List<Map<String, Object>>>() {
-//                    }
-//            );
-//
-//            if (firstApiResponse.getStatusCode() != HttpStatus.OK || firstApiResponse.getBody() == null) {
-//                logger.error("Error fetching all stock products from Abelini API");
-//                return;
-//            }
-//
-//            long totalProductsVarient = firstApiResponse.getBody().size();
-//            Set<String> uniqueProductIds = firstApiResponse.getBody().stream()
-//                    .map(m -> m.get("product_id").toString())
-//                    .collect(Collectors.toSet());
-            long totalProductsVarient = 8;
-            Set<String> uniqueProductIds = Set.of("1228");
+            String firstApiUrl = "https://www.abelini.com/shopify/api/all_stock_product.php";
+
+            ResponseEntity<String> firstApiResponse = restTemplate.exchange(
+                    firstApiUrl,
+                    HttpMethod.POST,
+                    null,
+                    String.class
+            );
+
+            if (firstApiResponse.getStatusCode() != HttpStatus.OK || firstApiResponse.getBody() == null) {
+                logger.error("Error fetching all stock products from Abelini API. Response: {}", firstApiResponse.getBody());
+                return;
+            }
+
+            List<Map<String, Object>> productList = objectMapper.readValue(firstApiResponse.getBody(), new TypeReference<>() {
+            });
+
+            long totalProductsVarient = productList.size();
+            Set<String> uniqueProductIds = productList.stream()
+                    .map(m -> m.get("product_id").toString())
+                    .collect(Collectors.toSet());
+
+//            long totalProductsVarient = 8;
+//            Set<String> uniqueProductIds = Set.of("1228");
 
             AtomicInteger totalProcessed = new AtomicInteger(0);
             AtomicInteger totalVariants = new AtomicInteger(0);
@@ -1517,11 +1522,11 @@ public class ProductMigrationService {
 
                         Map<String, String> extractIds = extractProductIdAndVariendId(response);
 
-//                        ProductVarientIds pi = new ProductVarientIds();
-//                        pi.setProductId(id);
-//                        pi.setShopifyProductId(extractIds.get("product"));
-//                        pi.setTagNo(tagNo);
-//                        productVarientIdsRepository.save(pi);
+                        ProductVarientIds pi = new ProductVarientIds();
+                        pi.setProductId(id);
+                        pi.setShopifyProductId(extractIds.get("product"));
+                        pi.setTagNo(tagNo);
+                        productVarientIdsRepository.save(pi);
 
                         getBaseVarientAndSetSkuAndPrice2(extractIds.get("product"), apiResponse);
                         List<JSONObject> metaFields = processMetafields(apiResponse);
@@ -1752,4 +1757,105 @@ public class ProductMigrationService {
 
         return processedMetafields;
     }
+
+    public void importedProduct2FieldReUploadSecond() {
+        try {
+            String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Starting product import at: {}", startTime);
+
+            AtomicInteger totalProcessed = new AtomicInteger(0);
+            AtomicInteger totalSuccess = new AtomicInteger(0);
+            AtomicInteger totalFailed = new AtomicInteger(0);
+
+            List<ProductIds> productIds = productIdsRepository.findAll();
+//            List<ProductIds> productIds = productIdsRepository.findByProductId("1228");
+            if (productIds.isEmpty()) {
+                logger.error("no id found");
+                return;
+            }
+            long totalCount = productIds.size();
+
+            for (ProductIds product : productIds) {
+                totalProcessed.incrementAndGet();
+                String id = product.getProductId();
+                try {
+                    logger.info("Processing product id: " + id);
+                    JSONObject apiResponse = fetchProductDetailsFromApi(id);
+
+                    if (apiResponse == null || apiResponse.isEmpty()) {
+                        logger.error("null or empty error while creating product id: " + id);
+                        totalFailed.incrementAndGet();
+                        logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, false, totalProcessed.get(), totalCount);
+                        continue;
+                    }
+
+                    List<JSONObject> metaFields = process2MetafieldsSecond(apiResponse);
+
+                    processApiResponseAndUploadMetafields(product.getShopifyProductId(), metaFields);
+
+                    logger.info("Product created successfully for product id: " + id);
+                    totalSuccess.incrementAndGet();
+
+                    logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, true, totalProcessed.get(), totalCount);
+                } catch (Exception e) {
+                    logger.error("Error processing product id :: {}", id);
+                }
+            }
+
+            String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Import 2 field process completed with total processed :: {}/{} with success: {}, failed: {} and started at :: {} and ended at :: {}",
+                    totalProcessed.get(), totalCount, totalSuccess.get(), totalFailed.get(),
+                    startTime, endTime);
+        } catch (Exception e) {
+            logger.error("Error processing the importedProduct2FieldReUpload : {}", e.getMessage(), e);
+        }
+    }
+
+    private List<JSONObject> process2MetafieldsSecond(JSONObject rawMetafields) {
+        List<JSONObject> processedMetafields = new ArrayList<>();
+
+        addMetafield(processedMetafields, rawMetafields, "category_feed_id", "number_integer", "opencart_category_id");
+        addMetafield(processedMetafields, rawMetafields, "style_feed_id", "number_integer", "opencart_style_id");
+
+        addProductReferenceListMetafield(processedMetafields, rawMetafields, "matching_products", "matching_product_open_cart");
+        addProductReferenceListMetafield(processedMetafields, rawMetafields, "related_products", "related_product_open_cart");
+        return processedMetafields;
+    }
+
+    private void addProductReferenceListMetafield(List<JSONObject> metafields, JSONObject raw, String key, String metafieldName) {
+        if (raw.has(key)) {
+            JSONArray idsArray = raw.optJSONArray(key);
+            if (idsArray == null && raw.get(key) instanceof String) {
+                idsArray = new JSONArray().put(raw.getString(key));
+            }
+
+            if (idsArray != null && !idsArray.isEmpty()) {
+                logger.info(metafieldName + " found size: " + idsArray.length());
+                List<String> idList = new ArrayList<>();
+                for (int i = 0; i < idsArray.length(); i++) {
+                    idList.add(idsArray.getString(i));
+                }
+
+                // Fetch GIDs from DB
+                List<ProductIds> products = productIdsRepository.findAllById(idList);
+                logger.info("products my db found : {}/{}", products.size(), idsArray.length());
+                JSONArray gidList = new JSONArray();
+                for (ProductIds product : products) {
+                    gidList.put(product.getShopifyProductId()); // Assuming this returns gid://shopify/Product/...
+                }
+
+                // Build metafield JSON
+                JSONObject metafield = new JSONObject();
+                metafield.put("namespace", "custom");
+                metafield.put("key", metafieldName);
+                metafield.put("type", "list.product_reference");
+                metafield.put("value", gidList.toString());
+
+                metafields.add(metafield);
+            }
+        }
+    }
+
 }
