@@ -1680,7 +1680,11 @@ public class ProductMigrationService {
             logger.info("Final Shopify product IDs to migrate: {}", shopifyIds.size());
 
             // Call migration
-            addProductsToCollection("675274621268", shopifyIds);
+            addProductsToCollection("gid://shopify/Collection/675274621268", shopifyIds);
+
+            logger.info("Import process complete! Products processed: {}/{}, Success: {}, Failed: {} | Variants processed: {}/{}, Success: {}, Failed: {} | Started at: {}, Ended at: {}",
+                    totalProcessed.get(), uniqueProductIds.size(), totalProductSuccess.get(), totalProductFailed.get(),
+                    totalVariants.get(), totalProductsVarient, totalVariantSuccess.get(), totalVariantFailed.get(), startTime, endTime);
         } catch (Exception e) {
             logger.error("Unexpected error in product migration: {}", e.getMessage(), e);
         }
@@ -1886,6 +1890,7 @@ public class ProductMigrationService {
         return processedMetafields;
     }
 
+    @Async
     public void importedProduct2FieldReUploadSecond() {
         try {
             String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
