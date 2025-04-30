@@ -15,7 +15,6 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -637,7 +636,7 @@ public class ProductMigrationService {
         }
 
 
-        if (type.contains("text_field") || type.contains("number")) {
+        if (type.contains("text_field") || type.contains("number") || type.equals("boolean")) {
             if (value instanceof List) {
                 logger.info("instance of list");
                 // Convert list to a comma-separated string
@@ -658,6 +657,9 @@ public class ProductMigrationService {
         } else if (type.contains("json")) {
             value = objectMapper.writeValueAsString(value.toString());
         }
+//        else if (type.equals("boolean")) {
+//            value = value.toString();
+//        }
 
         // Construct GraphQL mutation for adding a metafield
         String graphqlMutation = String.format("""
@@ -834,6 +836,16 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "having_stone_type", "multi_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "having_stone_shape", "multi_line_text_field");
 
+        addMetafield(processedMetafields, rawMetafields, "category_feed_id", "number_integer", "opencart_category_id");
+        addMetafield(processedMetafields, rawMetafields, "style_feed_id", "number_integer", "opencart_style_id");
+
+        addProductReferenceListMetafield(processedMetafields, rawMetafields, "matching_products", "matching_product_open_cart");
+        addProductReferenceListMetafield(processedMetafields, rawMetafields, "related_products", "related_product_open_cart");
+
+        addMetafield(processedMetafields, rawMetafields, "tag_no", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "certificate_number", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "is_quickship", "boolean");
+
         addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity", "single_line_text_field");
@@ -928,6 +940,15 @@ public class ProductMigrationService {
 
             if (key.equals("image") || key.equals("single_image")) {
                 value = value.toString().replace("/", "_");
+            }
+
+            if (type.equals("boolean")) {
+                String boolStr = value.toString().trim().toLowerCase();
+                if (!boolStr.equals("true") && !boolStr.equals("false")) {
+                    logger.warn("Invalid boolean value for key {}: {}", key, value);
+                    return;
+                }
+                value = boolStr;
             }
 
             metafield.put("namespace", "custom");
@@ -1443,36 +1464,107 @@ public class ProductMigrationService {
     }
 
     @Async
-    public void productVarientMigration() {
+    public void productVarientMigration(boolean isTest) {
         try {
             String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting product import at: {}", startTime);
 
-            String firstApiUrl = "https://www.abelini.com/shopify/api/all_stock_product.php";
+            String json;
 
-            ResponseEntity<String> firstApiResponse = restTemplate.exchange(
-                    firstApiUrl,
-                    HttpMethod.POST,
-                    null,
-                    String.class
-            );
+            if (!isTest) {
+                logger.info("fetching live all_stock_product");
+                String firstApiUrl = "https://www.abelini.com/shopify/api/all_stock_product.php";
 
-            if (firstApiResponse.getStatusCode() != HttpStatus.OK || firstApiResponse.getBody() == null) {
-                logger.error("Error fetching all stock products from Abelini API. Response: {}", firstApiResponse.getBody());
+                ResponseEntity<String> firstApiResponse = restTemplate.exchange(
+                        firstApiUrl,
+                        HttpMethod.POST,
+                        null,
+                        String.class
+                );
+
+                if (firstApiResponse.getStatusCode() != HttpStatus.OK) {
+                    logger.error("Error fetching all stock products from Abelini API. Response: {}", firstApiResponse.getBody());
+                    return;
+                }
+
+                json = firstApiResponse.getBody();
+            } else {
+                logger.info("fetching test all_stock_product");
+                json = """
+                        [
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1552646",
+                              "stock_id": "40749",
+                              "tag_no": "VR-61534"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1552840",
+                              "stock_id": "50603",
+                              "tag_no": "VR-71000"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1553007",
+                              "stock_id": "57173",
+                              "tag_no": "VR-77701"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1553172",
+                              "stock_id": "64819",
+                              "tag_no": "VR-85466"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1553410",
+                              "stock_id": "70439",
+                              "tag_no": "VR-90958"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1553411",
+                              "stock_id": "70496",
+                              "tag_no": "VR-90893"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1553422",
+                              "stock_id": "70762",
+                              "tag_no": "VR-91051"
+                          },
+                          {
+                              "product_id": "1228",
+                              "sort_order": "0",
+                              "parent_id": "1553568",
+                              "stock_id": "71563",
+                              "tag_no": "VR-91831"
+                          }
+                        ]
+                        """;
+            }
+
+            if (StringUtils.isBlank(json)) {
+                logger.info("json response is empty");
                 return;
             }
 
-            List<Map<String, Object>> productList = objectMapper.readValue(firstApiResponse.getBody(), new TypeReference<>() {
+            List<Map<String, Object>> productList = objectMapper.readValue(json, new TypeReference<>() {
             });
 
             long totalProductsVarient = productList.size();
             Set<String> uniqueProductIds = productList.stream()
                     .map(m -> m.get("product_id").toString())
                     .collect(Collectors.toSet());
-
-//            long totalProductsVarient = 8;
-//            Set<String> uniqueProductIds = Set.of("1228");
 
             AtomicInteger totalProcessed = new AtomicInteger(0);
             AtomicInteger totalVariants = new AtomicInteger(0);
@@ -1553,6 +1645,42 @@ public class ProductMigrationService {
             logger.info("Import process complete! Products processed: {}/{}, Success: {}, Failed: {} | Variants processed: {}/{}, Success: {}, Failed: {} | Started at: {}, Ended at: {}",
                     totalProcessed.get(), uniqueProductIds.size(), totalProductSuccess.get(), totalProductFailed.get(),
                     totalVariants.get(), totalProductsVarient, totalVariantSuccess.get(), totalVariantFailed.get(), startTime, endTime);
+
+            logger.info("start collection import process");
+            Map<String, ProductEntry> productEntryMap = new LinkedHashMap<>();
+            for (Map<String, Object> map : productList) {
+                String productId = String.valueOf(map.get("product_id"));
+                String tagNo = String.valueOf(map.get("tag_no"));
+                int sortOrder = Integer.parseInt(String.valueOf(map.get("sort_order")));
+
+                String key = productId + "::" + tagNo;
+                productEntryMap.putIfAbsent(key, new ProductEntry(productId, tagNo, sortOrder));
+            }
+
+            logger.info("Unique (product_id + tag_no) entries to process: {}", productEntryMap.size());
+
+            // Fetch all variant records
+            List<ProductVarientIds> allVariants = productVarientIdsRepository.findAll();
+
+            // Build a lookup map: (productId + "::" + tagNo) -> shopifyProductId
+            Map<String, String> variantLookup = allVariants.stream()
+                    .collect(Collectors.toMap(
+                            v -> v.getProductId() + "::" + v.getTagNo(),
+                            ProductVarientIds::getShopifyProductId,
+                            (a, b) -> a
+                    ));
+
+            // Sort and collect matching Shopify product IDs
+            List<String> shopifyIds = productEntryMap.values().stream()
+                    .sorted(Comparator.comparingInt(ProductEntry::getSortOrder))
+                    .map(entry -> variantLookup.get(entry.getProductId() + "::" + entry.getTagNo()))
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            logger.info("Final Shopify product IDs to migrate: {}", shopifyIds.size());
+
+            // Call migration
+            addProductsToCollection("675274621268", shopifyIds);
         } catch (Exception e) {
             logger.error("Unexpected error in product migration: {}", e.getMessage(), e);
         }
@@ -1824,7 +1952,8 @@ public class ProductMigrationService {
         return processedMetafields;
     }
 
-    private void addProductReferenceListMetafield(List<JSONObject> metafields, JSONObject raw, String key, String metafieldName) {
+    private void addProductReferenceListMetafield(List<JSONObject> metafields, JSONObject raw, String
+            key, String metafieldName) {
         if (raw.has(key)) {
             JSONArray idsArray = raw.optJSONArray(key);
             if (idsArray == null && raw.get(key) instanceof String) {

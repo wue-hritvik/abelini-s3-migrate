@@ -77,9 +77,9 @@ public class ProductMigrateController {
     }
 
     @PostMapping("/product-varient-migration")
-    public String productVarientMigration() {
-        migrationService.productVarientMigration();
-        return "Products imported started successfully.";
+    public String productVarientMigration(@RequestParam(required = false, defaultValue = "true") boolean isTest) {
+        migrationService.productVarientMigration(isTest);
+        return "Products varient imported started successfully.";
     }
 
     @PostMapping("/imported-product-2-fields-re-upload")
