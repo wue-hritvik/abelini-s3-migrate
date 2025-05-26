@@ -858,6 +858,8 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "certificate_number", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "is_quickship", "boolean");
 
+        addMetafield(processedMetafields, rawMetafields, "is_child", "boolean");
+
         addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity", "single_line_text_field");
@@ -2004,7 +2006,7 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_23-05-25-1.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-1.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://www.abelini.com/shopify/api/product/";
 

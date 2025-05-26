@@ -4,7 +4,15 @@ package com.abelini_s3_migrate.controller;
 import com.abelini_s3_migrate.service.ShopifyFileFetcherService;
 import com.abelini_s3_migrate.service.S3Service;
 import com.abelini_s3_migrate.service.ShopifyService;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.io.File;
 
 @RestController
 @RequestMapping("/shopify")
@@ -59,26 +67,26 @@ public class ShopifyController {
 ////        return "Bulk file renaming and copying started!";
 ////    }
 //
-//    @GetMapping("/download-csv")
-//    public ResponseEntity<?> downloadCsvFile(@RequestParam(required = false, name = "fileName") String path) {
+    @GetMapping("/download-csv")
+    public ResponseEntity<?> downloadCsvFile(@RequestParam String path) {
 //        String csvPath;
 //        if (path == null) {
 //            csvPath = "src/main/resources/s3file/s3_url_list.csv";
 //        } else {
 //            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
 //        }
-//        File file = new File(csvPath);
-//
-//        if (!file.exists()) {
-//            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("s3 file not found");
-//        }
-//
-//        Resource fileResource = new FileSystemResource(file);
-//        return ResponseEntity.ok()
-//                .contentType(MediaType.parseMediaType("text/csv"))
-//                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + file.getName())
-//                .body(fileResource);
-//    }
+        File file = new File(path);
+
+        if (!file.exists()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("s3 file not found");
+        }
+
+        Resource fileResource = new FileSystemResource(file);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("text/csv"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=" + file.getName())
+                .body(fileResource);
+    }
 //
 //    @GetMapping("/test")
 //    public String test() {
