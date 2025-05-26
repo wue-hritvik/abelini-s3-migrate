@@ -1,6 +1,13 @@
-package com.abelini_s3_migrate;
+package com.abelini_s3_migrate.service;
 
 
+import com.abelini_s3_migrate.entity.Product2Lakh;
+import com.abelini_s3_migrate.entity.ProductIds;
+import com.abelini_s3_migrate.entity.ProductVarientIds;
+import com.abelini_s3_migrate.extra.ProductEntry;
+import com.abelini_s3_migrate.repo.Product2lakhRepository;
+import com.abelini_s3_migrate.repo.ProductIdsRepository;
+import com.abelini_s3_migrate.repo.ProductVarientIdsRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -21,14 +28,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -51,6 +60,7 @@ public class ProductMigrationService {
 
     private final ProductIdsRepository productIdsRepository;
     private final ProductVarientIdsRepository productVarientIdsRepository;
+    private final Product2lakhRepository product2lakhRepository;
 
     private final Gson gson = new Gson();
     private final RestTemplate restTemplate = new RestTemplate();
@@ -66,9 +76,10 @@ public class ProductMigrationService {
 
     private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
 
-    public ProductMigrationService(ProductIdsRepository productIdsRepository, ProductVarientIdsRepository productVarientIdsRepository) {
+    public ProductMigrationService(ProductIdsRepository productIdsRepository, ProductVarientIdsRepository productVarientIdsRepository, Product2lakhRepository product2lakhRepository) {
         this.productIdsRepository = productIdsRepository;
         this.productVarientIdsRepository = productVarientIdsRepository;
+        this.product2lakhRepository = product2lakhRepository;
         creditRecoveryScheduler.scheduleAtFixedRate(() -> {
             int currentPoints = remainingPoints.get();
             if (currentPoints < MAX_POINTS) {
@@ -77,6 +88,7 @@ public class ProductMigrationService {
                 logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
             }
         }, 1, 1, TimeUnit.SECONDS);
+        createFileIfMissing();
     }
 
     private void regulateApiRate() {
@@ -1989,6 +2001,320 @@ public class ProductMigrationService {
 
                 metafields.add(metafield);
             }
+        }
+    }
+
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_23-05-25-1.csv";
+    private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
+    private static final String BASE_URL = "https://www.abelini.com/shopify/api/product/";
+
+    private final AtomicInteger totalProducts = new AtomicInteger(0);
+    private final AtomicInteger productSuccess = new AtomicInteger(0);
+    private final AtomicInteger productFailed = new AtomicInteger(0);
+
+    private final AtomicInteger totalVariants = new AtomicInteger(0);
+    private final AtomicInteger variantSuccess = new AtomicInteger(0);
+    private final AtomicInteger variantFailed = new AtomicInteger(0);
+
+    private void createFileIfMissing() {
+        try {
+            Path path = Paths.get(CSV_FILE);
+            if (!Files.exists(path)) {
+                Files.createDirectories(path.getParent());
+                Files.writeString(path, "product_id,variant_id,page,status\n", StandardOpenOption.CREATE);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Error creating log CSV file", e);
+        }
+    }
+
+    public void logVariant(String productId, String variantId, int page, boolean success) {
+        totalVariants.incrementAndGet();
+        if (success) variantSuccess.incrementAndGet();
+        else variantFailed.incrementAndGet();
+
+        writeToCsv(productId, variantId, page, success ? "SUCCESS" : "FAILED");
+    }
+
+    public void logProduct(String productId, boolean success) {
+        totalProducts.incrementAndGet();
+        if (success) productSuccess.incrementAndGet();
+        else productFailed.incrementAndGet();
+    }
+
+    private void writeToCsv(String productId, String variantId, int page, String status) {
+        try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(CSV_FILE), StandardOpenOption.APPEND)) {
+            writer.write(String.format("%s,%s,%d,%s%n", productId, variantId, page, status));
+        } catch (IOException e) {
+            System.err.println("Failed to write log entry: " + e.getMessage());
+        }
+    }
+
+    public void printSummary() {
+        System.out.println("\n======= IMPORT SUMMARY =======");
+        System.out.printf("Total Products Processed: %d%n", totalProducts.get());
+        System.out.printf("Product Success: %d%n", productSuccess.get());
+        System.out.printf("Product Failed: %d%n", productFailed.get());
+
+        System.out.printf("Total Variants Processed: %d%n", totalVariants.get());
+        System.out.printf("Variant Success: %d%n", variantSuccess.get());
+        System.out.printf("Variant Failed: %d%n", variantFailed.get());
+        System.out.println("CSV log saved to: " + CSV_FILE);
+        System.out.println("=================================\n");
+    }
+
+    @Async
+    public void imported2LakhProduct(boolean isTest) {
+        try {
+            String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Starting import 2 Lakh Product at: {}", startTime);
+
+            if (isTest) {
+                List<Map<String, Object>> productList = new ArrayList<>();
+
+                Map<String, Object> productl = new HashMap<>();
+                productl.put("product_id", "459");
+                productl.put("total_page", 1);
+                productList.add(productl);
+                for (Map<String, Object> product : productList) {
+                    String productId = String.valueOf(product.get("product_id"));
+                    int totalPages = Integer.parseInt(String.valueOf(product.get("total_page")));
+                    for (int page = 1; page <= totalPages; page++) {
+                        callProductDetails(productId, page);
+                    }
+                }
+            }
+//            else {
+//                // 1. Get all products
+//                String allProductsUrl = BASE_URL + "all_products.php";
+//                ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, null, String.class);
+//
+//                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+//                    List<Map<String, Object>> productList = objectMapper.readValue(
+//                            response.getBody(),
+//                            new TypeReference<>() {
+//                            }
+//                    );
+//
+//                    // 2. For each product, loop over pages and call detail API
+//                    for (Map<String, Object> product : productList) {
+//                        String productId = String.valueOf(product.get("product_id"));
+//                        int totalPages = Integer.parseInt(String.valueOf(product.get("total_page")));
+//                        try {
+//                            if (!productId.isBlank() && totalPages > 0) {
+//                                if ("459".equals(productId)) {
+//                                    continue;
+//                                }
+//                                for (int page = 1; page <= totalPages; page++) {
+//                                    callProductDetails(productId, page);
+//                                }
+//                            }
+//                        } catch (Exception e) {
+//                            e.printStackTrace();
+//                        }
+//                    }
+//
+//                } else {
+//                    System.err.println("Failed to fetch products: " + response.getStatusCode());
+//                }
+//            }
+
+            printSummary();
+
+            String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("2 lakh product import process ended..... started at : {} and ended at : {}", startTime, endTime);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+
+    private void callProductDetails(String productId, int page) {
+        String detailsUrl = BASE_URL + "all_product_pnc.php";
+
+        Map<String, String> payload = new HashMap<>();
+        payload.put("product_id", productId);
+        payload.put("page", String.valueOf(page));
+        payload.put("limit", "50");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        HttpEntity<Map<String, String>> request = new HttpEntity<>(payload, headers);
+
+        try {
+            ResponseEntity<String> response = restTemplate.postForEntity(detailsUrl, request, String.class);
+            System.out.printf("Fetched page %d for product %s%n", page, productId);
+            if (response.getStatusCode() == HttpStatus.OK) {
+                String json = response.getBody();
+                List<Map<String, Object>> productList = objectMapper.readValue(json, new TypeReference<>() {
+                });
+
+                if (!productList.isEmpty()) {
+                    for (Map<String, Object> product : productList) {
+                        String variantId = String.valueOf(product.get("code"));
+
+                        boolean isSuccess = importProductShopify(product, variantId, productId);
+                        logVariant(productId, variantId, page, isSuccess);
+                    }
+
+                    logProduct(productId, true);
+                } else {
+                    logProduct(productId, false);
+                }
+            } else {
+                logProduct(productId, false);
+                System.err.printf("Failed to fetch page %d for product %s: %s%n", page, productId, response.getStatusCode());
+            }
+        } catch (Exception e) {
+            logProduct(productId, false);
+            System.err.printf("Error while calling product detail for %s page %d: %s%n", productId, page, e.getMessage());
+        }
+    }
+
+    private boolean importProductShopify(Map<String, Object> product1, String variantId, String productId) {
+        try {
+            JSONObject apiResponse = new JSONObject(product1);
+            Map<String, Object> data = processResponse(apiResponse);
+            regulateApiRate();
+            remainingPoints.addAndGet(-API_COST_PER_CALL);
+
+            Map<String, Object> product = new HashMap<>();
+            product.put("product", data);
+            String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_CREATE, objectMapper.writeValueAsString(product), false);
+
+            if (response == null) {
+                logger.error("Shopify response null for product ID: {}, variant id: {}", productId, variantId);
+                return false;
+            }
+
+            Map<String, String> extractIds = extractProductIdAndVariendId(response);
+
+            Product2Lakh pi = new Product2Lakh();
+            pi.setProductId(productId);
+            pi.setShopifyProductId(extractIds.get("product"));
+            pi.setVariantCode(variantId);
+            product2lakhRepository.save(pi);
+
+            getBaseVarientAndSetSkuAndPrice3(extractIds.get("product"), apiResponse);
+            List<JSONObject> metaFields = processMetafields(apiResponse);
+            processApiResponseAndUploadMetafields(extractIds.get("product"), metaFields);
+
+            logger.info("Successfully created variant for product ID: {}, variant id: {}", productId, variantId);
+            return true;
+        } catch (Exception e) {
+            logger.error("Error while creating product id: {}, variant id: {}", productId, variantId);
+            return false;
+        }
+    }
+
+    private void getBaseVarientAndSetSkuAndPrice3(String productId, JSONObject apiResponse) {
+        try {
+            // Step 1: Fetch Base Variant ID
+            String query = """
+                        query GetBaseVariant($productId: ID!) {
+                            product(id: $productId) {
+                                variants(first: 1) {
+                                    edges {
+                                        node {
+                                            id
+                                            sku
+                                            price
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    """;
+
+            Map<String, Object> variable = new HashMap<>();
+            variable.put("productId", productId);
+
+            String response = sendGraphQLRequest(query, objectMapper.writeValueAsString(variable), false);
+            if (response == null) {
+                logger.error("Failed to fetch base variant for product ID: {}", productId);
+                return;
+            }
+
+            JSONObject responseObj = new JSONObject(response);
+
+            // Extract base variant ID
+            JSONObject data = responseObj.optJSONObject("data");
+            if (data == null) {
+                logger.error("Invalid GraphQL response: 'data' is missing");
+                return;
+            }
+
+            JSONObject product = data.optJSONObject("product");
+            if (product == null) {
+                logger.warn("No product found for ID: {}", productId);
+                return;
+            }
+
+            JSONObject variants = product.optJSONObject("variants");
+            if (variants == null) {
+                logger.warn("No variants found for product ID: {}", productId);
+                return;
+            }
+
+            JSONArray edges = variants.optJSONArray("edges");
+            if (edges == null || edges.isEmpty()) {
+                logger.warn("No variant edges found for product ID: {}", productId);
+                return;
+            }
+
+            // Extract base variant
+            JSONObject baseVariant = edges.getJSONObject(0).optJSONObject("node");
+            if (baseVariant == null) {
+                logger.warn("Base variant node is missing for product ID: {}", productId);
+                return;
+            }
+
+            String variantId = baseVariant.optString("id", null);
+            if (variantId == null) {
+                logger.warn("Variant ID is missing for product ID: {}", productId);
+                return;
+            }
+
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("variantId", variantId);
+
+            if (apiResponse.has("code")) {
+                variables.put("sku", apiResponse.optString("code"));
+            }
+
+            if (apiResponse.has("price")) {
+                String priceStr = String.format("%.2f", apiResponse.optDouble("price", 0.0)); // Ensure 2 decimal places
+                variables.put("price", new BigDecimal(priceStr));
+            }
+
+            // Correct Mutation
+            String mutation = """
+                    mutation UpdateVariant($variantId: ID!, $sku: String, $price: Money) {
+                      productVariantUpdate(input: { id: $variantId, sku: $sku, price: $price }) {
+                        productVariant {
+                          id
+                          sku
+                          price
+                        }
+                        userErrors {
+                          field
+                          message
+                        }
+                      }
+                    }
+                    """;
+
+            String updateResponse = sendGraphQLRequest(mutation, objectMapper.writeValueAsString(variables), true);
+            if (updateResponse == null) {
+                logger.error("Failed to update variant ID: {}", variantId);
+            }
+
+            logger.info("varient update successfully for product id: " + productId);
+
+        } catch (Exception e) {
+            logger.error("Error processing base variant update: {}", e.getMessage(), e);
         }
     }
 

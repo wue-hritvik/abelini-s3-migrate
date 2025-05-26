@@ -1,5 +1,6 @@
-package com.abelini_s3_migrate;
+package com.abelini_s3_migrate.controller;
 
+import com.abelini_s3_migrate.service.ShopifyService;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
 import org.apache.tika.Tika;
@@ -7,19 +8,15 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.BufferedWriter;
 import java.io.FileReader;
 import java.io.IOException;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -43,54 +40,54 @@ public class MediaController {
     private final Tika tika = new Tika();
     private static final Logger logger = LoggerFactory.getLogger(ShopifyService.class);
 
-    @PostMapping("/upload")
-    public ResponseEntity<String> uploadMedia(@RequestParam(required = false, name = "filePath") String filePath) throws IOException, CsvException {
-        logger.info("1");
-        if (filePath == null) {
-            logger.info("2");
-            filePath = "src/main/resources/s3file/s3_url_list.csv";
-        }
-        logger.info("3");
-        List<String> csvData = readCSV(filePath);
-        logger.info("5");
-        logger.info("data size :::"+ csvData.size());
-        List<String> remainingData = new ArrayList<>();
-        remainingData.add("image_url");
-        int successCount = 0;
-        logger.info("6");
-        for (String row : csvData) {
-            logger.info("for loop start");
-            String fileName = generateShopifyFilePath(row); ;
-
-            try {
-                URL url = new URL(row);
-                String mimeType = tika.detect(url);
-                long fileSize = url.openConnection().getContentLengthLong();
-
-                if (!SUPPORTED_MIME_TYPES.contains(mimeType)) {
-                    remainingData.add(row);
-                    logger.info("7");
-                    continue;
-                }
-
-                if (uploadToShopify(row, fileName, mimeType, fileSize)) {
-                    successCount++;
-                    logger.info("8");
-                } else {
-                    logger.info("9");
-                    remainingData.add(row);
-                }
-            } catch (Exception e) {
-                remainingData.add(row);
-                logger.info("10");
-                e.printStackTrace();
-            }
-        }
-        logger.info("for loop ends");
-
-        updateCSV(filePath, remainingData);
-        return ResponseEntity.ok(successCount + " files successfully uploaded.");
-    }
+//    @PostMapping("/upload")
+//    public ResponseEntity<String> uploadMedia(@RequestParam(required = false, name = "filePath") String filePath) throws IOException, CsvException {
+//        logger.info("1");
+//        if (filePath == null) {
+//            logger.info("2");
+//            filePath = "src/main/resources/s3file/s3_url_list.csv";
+//        }
+//        logger.info("3");
+//        List<String> csvData = readCSV(filePath);
+//        logger.info("5");
+//        logger.info("data size :::"+ csvData.size());
+//        List<String> remainingData = new ArrayList<>();
+//        remainingData.add("image_url");
+//        int successCount = 0;
+//        logger.info("6");
+//        for (String row : csvData) {
+//            logger.info("for loop start");
+//            String fileName = generateShopifyFilePath(row); ;
+//
+//            try {
+//                URL url = new URL(row);
+//                String mimeType = tika.detect(url);
+//                long fileSize = url.openConnection().getContentLengthLong();
+//
+//                if (!SUPPORTED_MIME_TYPES.contains(mimeType)) {
+//                    remainingData.add(row);
+//                    logger.info("7");
+//                    continue;
+//                }
+//
+//                if (uploadToShopify(row, fileName, mimeType, fileSize)) {
+//                    successCount++;
+//                    logger.info("8");
+//                } else {
+//                    logger.info("9");
+//                    remainingData.add(row);
+//                }
+//            } catch (Exception e) {
+//                remainingData.add(row);
+//                logger.info("10");
+//                e.printStackTrace();
+//            }
+//        }
+//        logger.info("for loop ends");
+//
+//        updateCSV(filePath, remainingData);
+//        return ResponseEntity.ok(successCount + " files successfully uploaded.");
+//    }
 
     private List<String> readCSV(String filePath) throws IOException, CsvException {
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {

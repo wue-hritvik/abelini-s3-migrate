@@ -1,5 +1,6 @@
-package com.abelini_s3_migrate;
+package com.abelini_s3_migrate.repo;
 
+import com.abelini_s3_migrate.entity.ProductIds;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

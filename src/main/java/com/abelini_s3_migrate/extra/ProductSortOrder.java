@@ -1,4 +1,4 @@
-package com.abelini_s3_migrate;
+package com.abelini_s3_migrate.extra;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

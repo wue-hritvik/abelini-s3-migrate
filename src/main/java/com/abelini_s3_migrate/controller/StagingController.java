@@ -1,5 +1,6 @@
-package com.abelini_s3_migrate;
+package com.abelini_s3_migrate.controller;
 
+import com.abelini_s3_migrate.service.ShopifyService;
 import org.apache.tika.Tika;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -7,17 +8,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 
 import java.io.ByteArrayInputStream;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 @RestController
@@ -44,44 +41,44 @@ public class StagingController {
         return fileName;
     }
 
-    @PostMapping("/upload")
-    public ResponseEntity<String> uploadFileFromS3(@RequestParam String s3Url) {
-        try {
-            String customFileName = generateShopifyFilePath(s3Url);
-            AtomicInteger totalUploads = new AtomicInteger(0);
-            // ✅ 1️⃣ Download File from S3
-            byte[] fileBytes = downloadFile(s3Url);
-            String mimeType = detectMimeType(fileBytes);
-            long fileSize = fileBytes.length;
-
-            // ✅ 2️⃣ Append Extension if Missing
-            String finalFileName = ensureFileExtension(customFileName, mimeType);
-
-            // ✅ 3️⃣ Get Shopify Staged Upload URL
-            Map<String, Object> uploadDetails = getShopifyUploadUrl(finalFileName, mimeType, fileSize);
-            logger.info("upload details ::: {}", uploadDetails);
-
-            // ✅ Extract `stagedTargets` list from uploadDetails
-            List<Map<String, Object>> stagedTargets = (List<Map<String, Object>>) uploadDetails.get("stagedTargets");
-
-            // ✅ Extract `resourceUrl` from the first item in the list
-            String resourceUrl = (String) stagedTargets.get(0).get("resourceUrl");
-
-            logger.info("Extracted resourceUrl: {}", resourceUrl);
-
-            // ✅ 4️⃣ Upload File to Shopify Storage
-            uploadFileToShopifyStorage(fileBytes, uploadDetails, finalFileName);
-
-            List<String> urls = new ArrayList<>();
-            urls.add(resourceUrl);
-            // ✅ 6️⃣ Register the File in Shopify
-//            shopifyService.registerBatchInShopify(urls, totalUploads);
-
-            return ResponseEntity.ok("File uploaded successfully: " + finalFileName);
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
-        }
-    }
+//    @PostMapping("/upload")
+//    public ResponseEntity<String> uploadFileFromS3(@RequestParam String s3Url) {
+//        try {
+//            String customFileName = generateShopifyFilePath(s3Url);
+//            AtomicInteger totalUploads = new AtomicInteger(0);
+//            // ✅ 1️⃣ Download File from S3
+//            byte[] fileBytes = downloadFile(s3Url);
+//            String mimeType = detectMimeType(fileBytes);
+//            long fileSize = fileBytes.length;
+//
+//            // ✅ 2️⃣ Append Extension if Missing
+//            String finalFileName = ensureFileExtension(customFileName, mimeType);
+//
+//            // ✅ 3️⃣ Get Shopify Staged Upload URL
+//            Map<String, Object> uploadDetails = getShopifyUploadUrl(finalFileName, mimeType, fileSize);
+//            logger.info("upload details ::: {}", uploadDetails);
+//
+//            // ✅ Extract `stagedTargets` list from uploadDetails
+//            List<Map<String, Object>> stagedTargets = (List<Map<String, Object>>) uploadDetails.get("stagedTargets");
+//
+//            // ✅ Extract `resourceUrl` from the first item in the list
+//            String resourceUrl = (String) stagedTargets.get(0).get("resourceUrl");
+//
+//            logger.info("Extracted resourceUrl: {}", resourceUrl);
+//
+//            // ✅ 4️⃣ Upload File to Shopify Storage
+//            uploadFileToShopifyStorage(fileBytes, uploadDetails, finalFileName);
+//
+//            List<String> urls = new ArrayList<>();
+//            urls.add(resourceUrl);
+//            // ✅ 6️⃣ Register the File in Shopify
+////            shopifyService.registerBatchInShopify(urls, totalUploads);
+//
+//            return ResponseEntity.ok("File uploaded successfully: " + finalFileName);
+//        } catch (Exception e) {
+//            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error: " + e.getMessage());
+//        }
+//    }
 
     // ✅ Download File from S3
     private byte[] downloadFile(String fileUrl) throws Exception {

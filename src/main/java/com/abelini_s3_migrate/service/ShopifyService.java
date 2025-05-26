@@ -1,4 +1,4 @@
-package com.abelini_s3_migrate;
+package com.abelini_s3_migrate.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
