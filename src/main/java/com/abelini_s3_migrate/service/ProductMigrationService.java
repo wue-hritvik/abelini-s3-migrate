@@ -2006,7 +2006,7 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-1.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-final.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://www.abelini.com/shopify/api/product/";
 
@@ -2087,40 +2087,40 @@ public class ProductMigrationService {
                     }
                 }
             }
-//            else {
-//                // 1. Get all products
-//                String allProductsUrl = BASE_URL + "all_products.php";
-//                ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, null, String.class);
-//
-//                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-//                    List<Map<String, Object>> productList = objectMapper.readValue(
-//                            response.getBody(),
-//                            new TypeReference<>() {
-//                            }
-//                    );
-//
-//                    // 2. For each product, loop over pages and call detail API
-//                    for (Map<String, Object> product : productList) {
-//                        String productId = String.valueOf(product.get("product_id"));
-//                        int totalPages = Integer.parseInt(String.valueOf(product.get("total_page")));
-//                        try {
-//                            if (!productId.isBlank() && totalPages > 0) {
-//                                if ("459".equals(productId)) {
-//                                    continue;
-//                                }
-//                                for (int page = 1; page <= totalPages; page++) {
-//                                    callProductDetails(productId, page);
-//                                }
-//                            }
-//                        } catch (Exception e) {
-//                            e.printStackTrace();
-//                        }
-//                    }
-//
-//                } else {
-//                    System.err.println("Failed to fetch products: " + response.getStatusCode());
-//                }
-//            }
+            else {
+                // 1. Get all products
+                String allProductsUrl = BASE_URL + "all_products.php";
+                ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, null, String.class);
+
+                if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                    List<Map<String, Object>> productList = objectMapper.readValue(
+                            response.getBody(),
+                            new TypeReference<>() {
+                            }
+                    );
+
+                    // 2. For each product, loop over pages and call detail API
+                    for (Map<String, Object> product : productList) {
+                        String productId = String.valueOf(product.get("product_id"));
+                        int totalPages = Integer.parseInt(String.valueOf(product.get("total_page")));
+                        try {
+                            if (!productId.isBlank() && totalPages > 0) {
+                                if ("459".equals(productId)) {
+                                    continue;
+                                }
+                                for (int page = 1; page <= totalPages; page++) {
+                                    callProductDetails(productId, page);
+                                }
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+
+                } else {
+                    System.err.println("Failed to fetch products: " + response.getStatusCode());
+                }
+            }
 
             printSummary();
 
