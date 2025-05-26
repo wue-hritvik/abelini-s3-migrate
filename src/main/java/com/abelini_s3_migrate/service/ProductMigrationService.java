@@ -2006,7 +2006,7 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-2.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-final.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://www.abelini.com/shopify/api/product/";
     private final AtomicInteger totalProducts = new AtomicInteger(0);
