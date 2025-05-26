@@ -2006,14 +2006,12 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-final.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-2.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://www.abelini.com/shopify/api/product/";
-
     private final AtomicInteger totalProducts = new AtomicInteger(0);
     private final AtomicInteger productSuccess = new AtomicInteger(0);
     private final AtomicInteger productFailed = new AtomicInteger(0);
-
     private final AtomicInteger totalVariants = new AtomicInteger(0);
     private final AtomicInteger variantSuccess = new AtomicInteger(0);
     private final AtomicInteger variantFailed = new AtomicInteger(0);
@@ -2023,19 +2021,19 @@ public class ProductMigrationService {
             Path path = Paths.get(CSV_FILE);
             if (!Files.exists(path)) {
                 Files.createDirectories(path.getParent());
-                Files.writeString(path, "product_id,variant_id,page,status\n", StandardOpenOption.CREATE);
+                Files.writeString(path, "product_id,variant_id,page,status,shopify_id\n", StandardOpenOption.CREATE);
             }
         } catch (IOException e) {
             throw new RuntimeException("Error creating log CSV file", e);
         }
     }
 
-    public void logVariant(String productId, String variantId, int page, boolean success) {
+    public void logVariant(String productId, String variantId, int page, boolean success, String shopifyId) {
         totalVariants.incrementAndGet();
         if (success) variantSuccess.incrementAndGet();
         else variantFailed.incrementAndGet();
 
-        writeToCsv(productId, variantId, page, success ? "SUCCESS" : "FAILED");
+        writeToCsv(productId, variantId, page, success ? "SUCCESS" : "FAILED", shopifyId.isBlank() ? "NA" : shopifyId);
     }
 
     public void logProduct(String productId, boolean success) {
@@ -2044,9 +2042,9 @@ public class ProductMigrationService {
         else productFailed.incrementAndGet();
     }
 
-    private void writeToCsv(String productId, String variantId, int page, String status) {
+    private void writeToCsv(String productId, String variantId, int page, String status, String shopifyId) {
         try (BufferedWriter writer = Files.newBufferedWriter(Paths.get(CSV_FILE), StandardOpenOption.APPEND)) {
-            writer.write(String.format("%s,%s,%d,%s%n", productId, variantId, page, status));
+            writer.write(String.format("%s,%s,%d,%s,%s%n", productId, variantId, page, status, shopifyId));
         } catch (IOException e) {
             System.err.println("Failed to write log entry: " + e.getMessage());
         }
@@ -2086,8 +2084,7 @@ public class ProductMigrationService {
                         callProductDetails(productId, page);
                     }
                 }
-            }
-            else {
+            } else {
                 // 1. Get all products
                 String allProductsUrl = BASE_URL + "all_products.php";
                 ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, null, String.class);
@@ -2157,8 +2154,8 @@ public class ProductMigrationService {
                     for (Map<String, Object> product : productList) {
                         String variantId = String.valueOf(product.get("code"));
 
-                        boolean isSuccess = importProductShopify(product, variantId, productId);
-                        logVariant(productId, variantId, page, isSuccess);
+                        String shopifyId = importProductShopify(product, variantId, productId);
+                        logVariant(productId, variantId, page, shopifyId != null, shopifyId);
                     }
 
                     logProduct(productId, true);
@@ -2175,7 +2172,7 @@ public class ProductMigrationService {
         }
     }
 
-    private boolean importProductShopify(Map<String, Object> product1, String variantId, String productId) {
+    private String importProductShopify(Map<String, Object> product1, String variantId, String productId) {
         try {
             JSONObject apiResponse = new JSONObject(product1);
             Map<String, Object> data = processResponse(apiResponse);
@@ -2188,7 +2185,7 @@ public class ProductMigrationService {
 
             if (response == null) {
                 logger.error("Shopify response null for product ID: {}, variant id: {}", productId, variantId);
-                return false;
+                return null;
             }
 
             Map<String, String> extractIds = extractProductIdAndVariendId(response);
@@ -2204,10 +2201,10 @@ public class ProductMigrationService {
             processApiResponseAndUploadMetafields(extractIds.get("product"), metaFields);
 
             logger.info("Successfully created variant for product ID: {}, variant id: {}", productId, variantId);
-            return true;
+            return extractIds.get("product");
         } catch (Exception e) {
             logger.error("Error while creating product id: {}, variant id: {}", productId, variantId);
-            return false;
+            return null;
         }
     }
 
