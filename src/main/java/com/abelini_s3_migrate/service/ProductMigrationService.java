@@ -779,10 +779,11 @@ public class ProductMigrationService {
         headers.set("Content-Type", "application/json");
         headers.setBearerAuth(jwtToken);
 
-        HttpEntity<Map<String, String>> entity = new HttpEntity<>(request, headers);
+        HttpEntity<?> entity = new HttpEntity<>(request, headers);
+        logger.info("api entity :: {}", entity);
 
         String response = restTemplate.postForObject(url, entity, String.class);
-//        logger.info("api response :: {}", response);
+        logger.info("api response :: {}", response);
         try {
             JSONArray jsonArray = new JSONArray(response);
             if (!jsonArray.isEmpty()) {
@@ -2348,7 +2349,13 @@ public class ProductMigrationService {
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting minPriceUpdateBaseProduct Product at: {}", startTime);
 
-            List<ProductIds> productIds = productIdsRepository.findAll();
+//            List<ProductIds> productIds = productIdsRepository.findAll();
+
+            List<ProductIds> productIds = new ArrayList<>();
+            ProductIds pro = new ProductIds();
+            pro.setProductId("1228");
+            pro.setShopifyProductId("gid://shopify/Product/11884996198740");
+            productIds.add(pro);
 
             AtomicInteger totalProcessed = new AtomicInteger(0);
             AtomicInteger totalSuccess = new AtomicInteger(0);
