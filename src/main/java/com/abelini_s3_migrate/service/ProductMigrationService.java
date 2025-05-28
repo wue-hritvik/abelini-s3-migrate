@@ -777,7 +777,8 @@ public class ProductMigrationService {
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("Content-Type", "application/json");
-        headers.setBearerAuth(jwtToken);
+//        headers.setBearerAuth(jwtToken);
+        headers.set("Authorization",jwtToken);
 
         HttpEntity<?> entity = new HttpEntity<>(request, headers);
         logger.info("api entity :: {}", entity);
