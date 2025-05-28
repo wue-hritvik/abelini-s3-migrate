@@ -92,4 +92,16 @@ public class ProductMigrateController {
         migrationService.imported2LakhProduct(isTest);
         return "Imported 2 Lakh Product started successfully";
     }
+
+    @PostMapping("min-price-field-update-base-product")
+    public String minPriceUpdateBaseProduct() {
+        migrationService.minPriceUpdateBaseProduct();
+        return "Min Price Update Base Product started successfully";
+    }
+
+//    @PostMapping("min-price-field-update-stock-product")
+//    public String minPriceUpdateStockProduct() {
+//        migrationService.minPriceUpdateStockProduct();
+//        return "Min Price Update Stock Product started successfully";
+//    }
 }

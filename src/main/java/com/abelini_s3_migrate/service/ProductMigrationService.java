@@ -52,11 +52,15 @@ import java.util.stream.Collectors;
 public class ProductMigrationService {
 
     private static final Logger logger = LoggerFactory.getLogger(ProductMigrationService.class);
+
     @Value("${shopify_store}")
     private String shopifyStore;
 
     @Value("${shopify_access_token}")
     private String accessToken;
+
+    @Value("${abelini_jwt_token}")
+    private String jwtToken;
 
     private final ProductIdsRepository productIdsRepository;
     private final ProductVarientIdsRepository productVarientIdsRepository;
@@ -152,6 +156,20 @@ public class ProductMigrationService {
                 }
             """;
 
+    private final String GRAPHQL_QUERY_PRODUCTS_UPDATE = """
+            mutation productUpdate($input: ProductInput!) {
+              productUpdate(input: $input) {
+                product {
+                  id
+                  title
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+            """;
 
     private Map<String, String> fetchMetaobjectDetails(String type) {
         Map<String, String> result = new HashMap<>();
@@ -441,7 +459,6 @@ public class ProductMigrationService {
                     }
 
                     Map<String, Object> data = processResponse(apiResponse);
-
                     regulateApiRate();
                     remainingPoints.addAndGet(-API_COST_PER_CALL);
 
@@ -754,12 +771,13 @@ public class ProductMigrationService {
 
 
     private JSONObject fetchProductDetailsFromApi(String productId) {
-        String url = "https://www.abelini.com/shopify/api/product/product_detail.php";
+        String url = "https://erp.abelini.com/shopify/api/product/product_detail.php";
         Map<String, String> request = new HashMap<>();
         request.put("product_id", productId);
 
         HttpHeaders headers = new HttpHeaders();
         headers.set("Content-Type", "application/json");
+        headers.setBearerAuth(jwtToken);
 
         HttpEntity<Map<String, String>> entity = new HttpEntity<>(request, headers);
 
@@ -2006,9 +2024,9 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_26-05-25-final.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_28-05-25-final.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
-    private static final String BASE_URL = "https://www.abelini.com/shopify/api/product/";
+    private static final String BASE_URL = "https://erp.abelini.com/shopify/api/product/";
     private final AtomicInteger totalProducts = new AtomicInteger(0);
     private final AtomicInteger productSuccess = new AtomicInteger(0);
     private final AtomicInteger productFailed = new AtomicInteger(0);
@@ -2087,7 +2105,11 @@ public class ProductMigrationService {
             } else {
                 // 1. Get all products
                 String allProductsUrl = BASE_URL + "all_products.php";
-                ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, null, String.class);
+                HttpHeaders headers = new HttpHeaders();
+                headers.setContentType(MediaType.APPLICATION_JSON);
+                headers.setBearerAuth(jwtToken);
+                HttpEntity<?> request = new HttpEntity<>(headers);
+                ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, request, String.class);
 
                 if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                     List<Map<String, Object>> productList = objectMapper.readValue(
@@ -2125,6 +2147,7 @@ public class ProductMigrationService {
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("2 lakh product import process ended..... started at : {} and ended at : {}", startTime, endTime);
         } catch (Exception e) {
+            logger.error("Error while importing 2 lakh product", e);
             e.printStackTrace();
         }
     }
@@ -2140,6 +2163,7 @@ public class ProductMigrationService {
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(jwtToken);
         HttpEntity<Map<String, String>> request = new HttpEntity<>(payload, headers);
 
         try {
@@ -2317,4 +2341,75 @@ public class ProductMigrationService {
         }
     }
 
+    @Async
+    public void minPriceUpdateBaseProduct() {
+        try {
+            String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Starting minPriceUpdateBaseProduct Product at: {}", startTime);
+
+            List<ProductIds> productIds = productIdsRepository.findAll();
+
+            AtomicInteger totalProcessed = new AtomicInteger(0);
+            AtomicInteger totalSuccess = new AtomicInteger(0);
+            AtomicInteger totalFailed = new AtomicInteger(0);
+            List<String> failedIds = new ArrayList<>();
+
+            for (ProductIds product : productIds) {
+                try {
+                    totalProcessed.incrementAndGet();
+                    JSONObject apiResponse = fetchProductDetailsFromApi(product.getProductId());
+                    if (apiResponse == null || apiResponse.isEmpty()) {
+                        logger.error("null or empty error while creating product id: " + product.getProductId());
+                        totalFailed.incrementAndGet();
+                        failedIds.add(product.getProductId());
+                        continue;
+                    }
+
+                    Map<String, Object> data = processResponse(apiResponse);
+                    if (data == null) {
+                        logger.error("data null error while creating product id: " + product.getProductId());
+                        totalFailed.incrementAndGet();
+                        failedIds.add(product.getProductId());
+                        continue;
+                    } else {
+                        data.put("id", product.getShopifyProductId());
+                    }
+
+                    regulateApiRate();
+                    remainingPoints.addAndGet(-API_COST_PER_CALL);
+
+                    Map<String, Object> input = new HashMap<>();
+                    input.put("input", data);
+                    String response = sendGraphQLRequest(GRAPHQL_QUERY_PRODUCTS_UPDATE, objectMapper.writeValueAsString(input), false);
+
+                    if (response == null) {
+                        logger.error("shopify response null error while creating product id: " + product.getProductId());
+                        totalFailed.incrementAndGet();
+                        failedIds.add(product.getProductId());
+                        continue;
+                    }
+
+                    getBaseVarientAndSetSkuAndPrice(product.getShopifyProductId(), apiResponse);
+
+                    List<JSONObject> metaFields = processMetafields(apiResponse);
+
+                    processApiResponseAndUploadMetafields(product.getShopifyProductId(), metaFields);
+
+                    logger.info("Product updated successfully for product id: " + product.getProductId());
+                    totalSuccess.incrementAndGet();
+                } catch (Exception e) {
+                    failedIds.add(product.getProductId());
+                    totalFailed.incrementAndGet();
+                    logger.error("Exception while minPriceUpdateBaseProduct for product id:{} ::: ", product.getProductId(), e);
+                }
+            }
+
+            String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                    .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+            logger.info("Completed minPriceUpdateBaseProduct Product started at :{} and ended at :{} :::  total count :{}, processed count :{}, success count :{}, failed count :{}, failed ids:{}", startTime, endTime, productIds.size(), totalProcessed.get(), totalSuccess.get(), totalFailed.get(), failedIds);
+        } catch (Exception e) {
+            logger.error("Exception while minPriceUpdateBaseProduct ::: ", e);
+        }
+    }
 }
