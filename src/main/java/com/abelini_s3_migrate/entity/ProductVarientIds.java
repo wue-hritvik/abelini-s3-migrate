@@ -11,7 +11,7 @@ import lombok.Setter;
 @Entity
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "product_Varient_ids")
+@Table(name = "dd_product_to_shopify_stock")
 public class ProductVarientIds {
 
     @Id

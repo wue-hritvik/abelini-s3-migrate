@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "product_2_lakh")
+@Table(name = "dd_search_product_shopify")
 public class Product2Lakh {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

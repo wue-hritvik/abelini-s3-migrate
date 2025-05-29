@@ -10,7 +10,7 @@ import lombok.*;
 @Entity
 @AllArgsConstructor
 @NoArgsConstructor
-@Table(name = "product_ids")
+@Table(name = "dd_product_to_shopify")
 public class ProductIds {
 
     @Id
