@@ -778,7 +778,7 @@ public class ProductMigrationService {
         HttpHeaders headers = new HttpHeaders();
         headers.set("Content-Type", "application/json");
 //        headers.setBearerAuth(jwtToken);
-        headers.set("Authorization",jwtToken);
+        headers.set("Authorization", jwtToken);
 
         HttpEntity<?> entity = new HttpEntity<>(request, headers);
         //logger.info("api entity :: {}", entity);
@@ -2026,7 +2026,7 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_28-05-25-final.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_29-05-25-final.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://erp.abelini.com/shopify/api/product/";
     private final AtomicInteger totalProducts = new AtomicInteger(0);
@@ -2109,7 +2109,7 @@ public class ProductMigrationService {
                 String allProductsUrl = BASE_URL + "all_products.php";
                 HttpHeaders headers = new HttpHeaders();
                 headers.setContentType(MediaType.APPLICATION_JSON);
-                headers.setBearerAuth(jwtToken);
+                headers.set("Authorization", jwtToken);
                 HttpEntity<?> request = new HttpEntity<>(headers);
                 ResponseEntity<String> response = restTemplate.postForEntity(allProductsUrl, request, String.class);
 
@@ -2165,8 +2165,8 @@ public class ProductMigrationService {
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.setBearerAuth(jwtToken);
-        HttpEntity<Map<String, String>> request = new HttpEntity<>(payload, headers);
+        headers.set("Authorization", jwtToken);
+        HttpEntity<?> request = new HttpEntity<>(payload, headers);
 
         try {
             ResponseEntity<String> response = restTemplate.postForEntity(detailsUrl, request, String.class);
@@ -2216,11 +2216,15 @@ public class ProductMigrationService {
 
             Map<String, String> extractIds = extractProductIdAndVariendId(response);
 
-            Product2Lakh pi = new Product2Lakh();
-            pi.setProductId(productId);
-            pi.setShopifyProductId(extractIds.get("product"));
-            pi.setVariantCode(variantId);
-            product2lakhRepository.save(pi);
+            try {
+                Product2Lakh pi = new Product2Lakh();
+                pi.setProductId(productId);
+                pi.setShopifyProductId(extractIds.get("product"));
+                pi.setVariantCode(variantId);
+                product2lakhRepository.save(pi);
+            } catch (Exception e) {
+                logger.error("Exception while saving product: {} vaient: {} in db", productId, variantId);
+            }
 
             getBaseVarientAndSetSkuAndPrice3(extractIds.get("product"), apiResponse);
             List<JSONObject> metaFields = processMetafields(apiResponse);
@@ -2350,13 +2354,21 @@ public class ProductMigrationService {
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting minPriceUpdateBaseProduct Product at: {}", startTime);
 
-            List<ProductIds> productIds = productIdsRepository.findAll();
+//            List<ProductIds> productIds = productIdsRepository.findAll();
 
-//            List<ProductIds> productIds = new ArrayList<>();
-//            ProductIds pro = new ProductIds();
-//            pro.setProductId("1228");
-//            pro.setShopifyProductId("gid://shopify/Product/11884996198740");
-//            productIds.add(pro);
+            List<ProductIds> productIds = new ArrayList<>();
+            ProductIds pro = new ProductIds();
+            pro.setProductId("10000");
+            pro.setShopifyProductId("gid://shopify/Product/11886214873428");
+            productIds.add(pro);
+            ProductIds pro2 = new ProductIds();
+            pro2.setProductId("10625");
+            pro2.setShopifyProductId("gid://shopify/Product/11886322319700");
+            productIds.add(pro2);
+            ProductIds pro3 = new ProductIds();
+            pro3.setProductId("11001");
+            pro3.setShopifyProductId("gid://shopify/Product/11886403715412");
+            productIds.add(pro3);
 
             AtomicInteger totalProcessed = new AtomicInteger(0);
             AtomicInteger totalSuccess = new AtomicInteger(0);
