@@ -2035,6 +2035,8 @@ public class ProductMigrationService {
     private final AtomicInteger totalVariants = new AtomicInteger(0);
     private final AtomicInteger variantSuccess = new AtomicInteger(0);
     private final AtomicInteger variantFailed = new AtomicInteger(0);
+    private final List<String> failedProducts = Collections.synchronizedList(new ArrayList<>());
+    private final List<String> failedVariants = Collections.synchronizedList(new ArrayList<>());
 
     private void createFileIfMissing() {
         try {
@@ -2050,16 +2052,24 @@ public class ProductMigrationService {
 
     public void logVariant(String productId, String variantId, int page, boolean success, String shopifyId) {
         totalVariants.incrementAndGet();
-        if (success) variantSuccess.incrementAndGet();
-        else variantFailed.incrementAndGet();
+        if (success) {
+            variantSuccess.incrementAndGet();
+        } else {
+            variantFailed.incrementAndGet();
+            failedVariants.add(productId + "___" + variantId);
+        }
 
         writeToCsv(productId, variantId, page, success ? "SUCCESS" : "FAILED", shopifyId.isBlank() ? "NA" : shopifyId);
     }
 
     public void logProduct(String productId, boolean success) {
         totalProducts.incrementAndGet();
-        if (success) productSuccess.incrementAndGet();
-        else productFailed.incrementAndGet();
+        if (success) {
+            productSuccess.incrementAndGet();
+        } else {
+            productFailed.incrementAndGet();
+            failedProducts.add(productId);
+        }
     }
 
     private void writeToCsv(String productId, String variantId, int page, String status, String shopifyId) {
@@ -2075,10 +2085,12 @@ public class ProductMigrationService {
         System.out.printf("Total Products Processed: %d%n", totalProducts.get());
         System.out.printf("Product Success: %d%n", productSuccess.get());
         System.out.printf("Product Failed: %d%n", productFailed.get());
+        System.out.printf("Product Failed list: %s%n", failedProducts);
 
         System.out.printf("Total Variants Processed: %d%n", totalVariants.get());
         System.out.printf("Variant Success: %d%n", variantSuccess.get());
         System.out.printf("Variant Failed: %d%n", variantFailed.get());
+        System.out.printf("Variant Failed list: %s%n", failedVariants);
         System.out.println("CSV log saved to: " + CSV_FILE);
         System.out.println("=================================\n");
     }
