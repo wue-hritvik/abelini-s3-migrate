@@ -81,23 +81,23 @@ public class ProductMigrateController {
 //        return "Imported Product 2 Field ReUpload started successfully";
 //    }
 //
-//    @PostMapping("/imported-product-2-fields-re-upload/second-time")
-//    public String importedProduct2FieldReUploadSecond() {
-//        migrationService.importedProduct2FieldReUploadSecond();
-//        return "Imported Product 2 Field second ReUpload started successfully";
+    @PostMapping("/imported-product-2-fields-re-upload/second-time")
+    public String importedProduct2FieldReUploadSecond() {
+        migrationService.importedProduct2FieldReUploadSecond();
+        return "Imported Product 2 Field second ReUpload started successfully";
+    }
+
+//    @PostMapping("/imported-2-lakh-product")
+//    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest) {
+//        migrationService.imported2LakhProduct(isTest);
+//        return "Imported 2 Lakh Product started successfully";
 //    }
-
-    @PostMapping("/imported-2-lakh-product")
-    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest) {
-        migrationService.imported2LakhProduct(isTest);
-        return "Imported 2 Lakh Product started successfully";
-    }
-
-    @PostMapping("base-product-update-all-fields")
-    public String minPriceUpdateBaseProduct() {
-        migrationService.minPriceUpdateBaseProduct();
-        return "Base Products all fields update started successfully";
-    }
+//
+//    @PostMapping("base-product-update-all-fields")
+//    public String minPriceUpdateBaseProduct() {
+//        migrationService.minPriceUpdateBaseProduct();
+//        return "Base Products all fields update started successfully";
+//    }
 
 //    @PostMapping("min-price-field-update-stock-product")
 //    public String minPriceUpdateStockProduct() {

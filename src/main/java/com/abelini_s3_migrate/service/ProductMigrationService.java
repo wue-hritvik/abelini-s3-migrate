@@ -1968,6 +1968,12 @@ public class ProductMigrationService {
                 } catch (Exception e) {
                     logger.error("Error processing product id :: {}", id);
                 }
+//                try {
+//                    Thread.sleep(1000); // 1000 milliseconds = 1 second
+//                } catch (InterruptedException ie) {
+//                    Thread.currentThread().interrupt(); // Reset the interruption status
+//                    logger.warn("Thread sleep interrupted while processing product id: {}", id);
+//                }
             }
 
             String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
@@ -1986,8 +1992,8 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "category_feed_id", "number_integer", "opencart_category_id");
         addMetafield(processedMetafields, rawMetafields, "style_feed_id", "number_integer", "opencart_style_id");
 
-        addProductReferenceListMetafield(processedMetafields, rawMetafields, "matching_products", "matching_product_open_cart");
-        addProductReferenceListMetafield(processedMetafields, rawMetafields, "related_products", "related_product_open_cart");
+//        addProductReferenceListMetafield(processedMetafields, rawMetafields, "matching_products", "matching_product_open_cart");
+//        addProductReferenceListMetafield(processedMetafields, rawMetafields, "related_products", "related_product_open_cart");
         return processedMetafields;
     }
 
@@ -2366,21 +2372,21 @@ public class ProductMigrationService {
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting minPriceUpdateBaseProduct Product at: {}", startTime);
 
-//            List<ProductIds> productIds = productIdsRepository.findAll();
+            List<ProductIds> productIds = productIdsRepository.findAll();
 
-            List<ProductIds> productIds = new ArrayList<>();
-            ProductIds pro = new ProductIds();
-            pro.setProductId("10000");
-            pro.setShopifyProductId("gid://shopify/Product/11886214873428");
-            productIds.add(pro);
-            ProductIds pro2 = new ProductIds();
-            pro2.setProductId("10625");
-            pro2.setShopifyProductId("gid://shopify/Product/11886322319700");
-            productIds.add(pro2);
-            ProductIds pro3 = new ProductIds();
-            pro3.setProductId("11001");
-            pro3.setShopifyProductId("gid://shopify/Product/11886403715412");
-            productIds.add(pro3);
+//            List<ProductIds> productIds = new ArrayList<>();
+//            ProductIds pro = new ProductIds();
+//            pro.setProductId("10000");
+//            pro.setShopifyProductId("gid://shopify/Product/11886214873428");
+//            productIds.add(pro);
+//            ProductIds pro2 = new ProductIds();
+//            pro2.setProductId("10625");
+//            pro2.setShopifyProductId("gid://shopify/Product/11886322319700");
+//            productIds.add(pro2);
+//            ProductIds pro3 = new ProductIds();
+//            pro3.setProductId("11001");
+//            pro3.setShopifyProductId("gid://shopify/Product/11886403715412");
+//            productIds.add(pro3);
 
             AtomicInteger totalProcessed = new AtomicInteger(0);
             AtomicInteger totalSuccess = new AtomicInteger(0);
