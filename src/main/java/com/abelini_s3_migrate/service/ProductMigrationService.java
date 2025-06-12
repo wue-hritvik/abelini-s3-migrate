@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.http.*;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -78,7 +79,9 @@ public class ProductMigrationService {
     public static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
 
     @Autowired
+    @Lazy
     private ProductMigrationService self;
+
     private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
 
     public ProductMigrationService(ProductIdsRepository productIdsRepository, ProductVarientIdsRepository productVarientIdsRepository, Product2lakhRepository product2lakhRepository, ProductCaratRepository productCaratRepository, ProductBestsellerRepository productBestsellerRepository) {
