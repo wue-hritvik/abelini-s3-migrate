@@ -957,7 +957,7 @@ public class ProductMigrationService {
         addMetafield(processedMetafields, rawMetafields, "is_child", "boolean");
 
         addMetafield(processedMetafields, rawMetafields, "is_carat", "boolean");
-        addMetafield(processedMetafields, rawMetafields, "is_bestseller", "boolean");
+        addMetafield(processedMetafields, rawMetafields, "is_best_seller", "boolean");
 
         addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
@@ -1057,7 +1057,11 @@ public class ProductMigrationService {
 
             if (type.equals("boolean")) {
                 String boolStr = value.toString().trim().toLowerCase();
-                if (!boolStr.equals("true") && !boolStr.equals("false")) {
+                if (boolStr.equals("1")) {
+                    boolStr = "true";
+                } else if (boolStr.equals("0")) {
+                    boolStr = "false";
+                } else if (!boolStr.equals("true") && !boolStr.equals("false")) {
                     logger.warn("Invalid boolean value for key {}: {}", key, value);
                     return;
                 }
@@ -2481,8 +2485,12 @@ public class ProductMigrationService {
 
                         if (importedVarients.contains(variantId)) continue;
 
-                        String shopifyId = importProductShopify(product, variantId, productId);
-                        logVariant(productId, variantId, page, shopifyId != null, shopifyId);
+                        try {
+                            String shopifyId = importProductShopify(product, variantId, productId);
+                            logVariant(productId, variantId, page, shopifyId != null, shopifyId);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                     }
 
                     logProduct(productId, true);
@@ -2890,9 +2898,12 @@ public class ProductMigrationService {
                         String variantId = String.valueOf(product.get("code"));
 
                         if (importedVarients.contains(variantId)) continue;
-
-                        String shopifyId = importProductShopifyCarat(product, variantId, productId);
-                        logVariantCarat(productId, variantId, page, shopifyId != null, shopifyId);
+                        try {
+                            String shopifyId = importProductShopifyCarat(product, variantId, productId);
+                            logVariantCarat(productId, variantId, page, shopifyId != null, shopifyId);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                     }
 
                     logProductCarat(productId, true);
@@ -3055,8 +3066,12 @@ public class ProductMigrationService {
 
                         if (importedVarients.contains(variantId)) continue;
 
-                        String shopifyId = importProductShopifyBestseller(product, variantId, productId);
-                        logVariantBestseller(productId, variantId, page, shopifyId != null, shopifyId);
+                        try {
+                            String shopifyId = importProductShopifyBestseller(product, variantId, productId);
+                            logVariantBestseller(productId, variantId, page, shopifyId != null, shopifyId);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                     }
 
                     logProductBestseller(productId, true);
