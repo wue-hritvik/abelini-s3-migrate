@@ -1,15 +1,15 @@
 package com.abelini_s3_migrate.repo;
 
-import com.abelini_s3_migrate.entity.Product2Lakh;
+import com.abelini_s3_migrate.entity.ProductBestseller;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.util.*;
+import java.util.Set;
 
 @Repository
-public interface Product2lakhRepository extends JpaRepository<Product2Lakh, Long> {
-    @Query("SELECT p.variantCode FROM Product2Lakh p WHERE p.productId = :productId")
+public interface ProductBestsellerRepository extends JpaRepository<ProductBestseller, Long> {
+    @Query("SELECT p.variantCode FROM ProductBestseller p WHERE p.productId = :productId")
     Set<String> findVarientIdsByProductId(@Param("productId") String productId);
 }

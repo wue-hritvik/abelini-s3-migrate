@@ -5,7 +5,11 @@ import com.abelini_s3_migrate.service.ProductMigrationService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/product/migrate")
@@ -81,15 +85,16 @@ public class ProductMigrateController {
 //        return "Imported Product 2 Field ReUpload started successfully";
 //    }
 //
-    @PostMapping("/imported-product-2-fields-re-upload/second-time")
-    public String importedProduct2FieldReUploadSecond() {
-        migrationService.importedProduct2FieldReUploadSecond();
-        return "Imported Product 2 Field second ReUpload started successfully";
-    }
+//    @PostMapping("/imported-product-2-fields-re-upload/second-time")
+//    public String importedProduct2FieldReUploadSecond() {
+//        migrationService.importedProduct2FieldReUploadSecond();
+//        return "Imported Product 2 Field second ReUpload started successfully";
+//    }
 
 //    @PostMapping("/imported-2-lakh-product")
-//    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest) {
-//        migrationService.imported2LakhProduct(isTest);
+//    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+//                                       @RequestBody Set<Long> failedProductIds) {
+//        migrationService.imported2LakhProduct(isTest, failedProductIds);
 //        return "Imported 2 Lakh Product started successfully";
 //    }
 //
@@ -104,4 +109,24 @@ public class ProductMigrateController {
 //        migrationService.minPriceUpdateStockProduct();
 //        return "Min Price Update Stock Product started successfully";
 //    }
+
+    @PostMapping("/imported-all-3-script-in-1-call")
+    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+                                            @RequestBody Set<Long> failedProductIds) {
+        migrationService.importedAll3ScriptIn1Call(isTest, failedProductIds);
+        return "importedAll3ScriptIn1Call started successfully";
+    }
+
+    @GetMapping("/import/summary")
+    public ResponseEntity<String> getImportSummaries() {
+        String summary = migrationService.printSummary();
+        String caratSummary = migrationService.printSummaryCarat();
+        String bestSellerSummary = migrationService.printSummaryBestSeller();
+
+        String fullSummary = summary + caratSummary + bestSellerSummary;
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(fullSummary);
+    }
 }
