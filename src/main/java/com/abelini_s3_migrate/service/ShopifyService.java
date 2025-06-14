@@ -41,7 +41,7 @@ public class ShopifyService {
     @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify_access_token}")
+    @Value("${shopify_access_token_2}")
     private String accessToken;
 
     private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2025-01/graphql.json";

@@ -33,7 +33,7 @@ public class MediaController {
     @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify_access_token}")
+    @Value("${shopify_access_token_2}")
     private String SHOPIFY_ACCESS_TOKEN;
     private  final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2024-04/graphql.json";
     private final RestTemplate restTemplate = new RestTemplate();

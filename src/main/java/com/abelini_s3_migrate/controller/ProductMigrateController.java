@@ -85,18 +85,18 @@ public class ProductMigrateController {
 //        return "Imported Product 2 Field ReUpload started successfully";
 //    }
 //
-//    @PostMapping("/imported-product-2-fields-re-upload/second-time")
-//    public String importedProduct2FieldReUploadSecond() {
-//        migrationService.importedProduct2FieldReUploadSecond();
-//        return "Imported Product 2 Field second ReUpload started successfully";
-//    }
+    @PostMapping("/imported-product-2-fields-re-upload/second-time")
+    public String importedProduct2FieldReUploadSecond() {
+        migrationService.importedProduct2FieldReUploadSecond();
+        return "Imported Product 2 Field second ReUpload started successfully";
+    }
 
-//    @PostMapping("/imported-2-lakh-product")
-//    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest,
-//                                       @RequestBody Set<Long> failedProductIds) {
-//        migrationService.imported2LakhProduct(isTest, failedProductIds);
-//        return "Imported 2 Lakh Product started successfully";
-//    }
+    @PostMapping("/imported-2-lakh-product")
+    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+                                       @RequestBody Set<Long> failedProductIds) {
+        migrationService.imported2LakhProduct(isTest, failedProductIds);
+        return "Imported 2 Lakh Product started successfully";
+    }
 //
 //    @PostMapping("base-product-update-all-fields")
 //    public String minPriceUpdateBaseProduct() {
@@ -110,12 +110,12 @@ public class ProductMigrateController {
 //        return "Min Price Update Stock Product started successfully";
 //    }
 
-    @PostMapping("/imported-all-3-script-in-1-call")
-    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
-                                            @RequestBody Set<Long> failedProductIds) {
-        migrationService.importedAll3ScriptIn1Call(isTest, failedProductIds);
-        return "importedAll3ScriptIn1Call started successfully";
-    }
+//    @PostMapping("/imported-all-3-script-in-1-call")
+//    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+//                                            @RequestBody Set<Long> failedProductIds) {
+//        migrationService.importedAll3ScriptIn1Call(isTest, failedProductIds);
+//        return "importedAll3ScriptIn1Call started successfully";
+//    }
 
     @GetMapping("/import/summary")
     public ResponseEntity<String> getImportSummaries() {

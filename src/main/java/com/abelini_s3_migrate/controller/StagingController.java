@@ -23,7 +23,7 @@ public class StagingController {
     @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify_access_token}")
+    @Value("${shopify_access_token_2}")
     private String ACCESS_TOKEN;
     private static final Logger logger = LoggerFactory.getLogger(StagingController.class);
     private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2024-04/graphql.json";

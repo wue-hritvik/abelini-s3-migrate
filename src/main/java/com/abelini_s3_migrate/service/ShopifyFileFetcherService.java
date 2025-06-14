@@ -34,7 +34,7 @@ public class ShopifyFileFetcherService {
     @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify_access_token}")
+    @Value("${shopify_access_token_2}")
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
     private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_26-03.csv";

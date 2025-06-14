@@ -54,7 +54,7 @@ public class ProductMigrationService {
     @Value("${shopify_store}")
     private String shopifyStore;
 
-    @Value("${shopify_access_token}")
+    @Value("${shopify_access_token_2}")
     private String accessToken;
 
     @Value("${abelini_jwt_token}")
@@ -83,6 +83,7 @@ public class ProductMigrationService {
     private ProductMigrationService self;
 
     private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
+    public final ScheduledExecutorService creditRecoverySchedulerLive = Executors.newScheduledThreadPool(1);
 
     public ProductMigrationService(ProductIdsRepository productIdsRepository, ProductVarientIdsRepository productVarientIdsRepository, Product2lakhRepository product2lakhRepository, ProductCaratRepository productCaratRepository, ProductBestsellerRepository productBestsellerRepository) {
         this.productIdsRepository = productIdsRepository;
@@ -98,6 +99,7 @@ public class ProductMigrationService {
                 logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
             }
         }, 1, 1, TimeUnit.SECONDS);
+        creditRecoverySchedulerLive.scheduleAtFixedRate(this::initializeRemainingPointsFromShopify, 1, 1, TimeUnit.MINUTES);
         createFileIfMissing();
         createFileIfMissing2();
         createFileIfMissing3();
@@ -108,6 +110,10 @@ public class ProductMigrationService {
         int waitTime = 0;
 
         while (remainingPoints.get() < SAFE_THRESHOLD) {
+            initializeRemainingPointsFromShopify();
+            if (remainingPoints.get() > SAFE_THRESHOLD * 3) {
+                return;
+            }
             if (waitTime >= maxWaitTime) {
                 logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
                 break;
@@ -958,6 +964,9 @@ public class ProductMigrationService {
 
         addMetafield(processedMetafields, rawMetafields, "is_carat", "boolean");
         addMetafield(processedMetafields, rawMetafields, "is_best_seller", "boolean");
+
+        addMetafield(processedMetafields, rawMetafields, "product_style_name", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "product_category_name", "single_line_text_field");
 
         addMetafield(processedMetafields, rawMetafields, "location", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "quantity_text", "single_line_text_field");
@@ -2014,9 +2023,12 @@ public class ProductMigrationService {
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting product import at: {}", startTime);
 
+            waitForErpHealth();
+
             AtomicInteger totalProcessed = new AtomicInteger(0);
             AtomicInteger totalSuccess = new AtomicInteger(0);
             AtomicInteger totalFailed = new AtomicInteger(0);
+            List<String> failedProducts2 = Collections.synchronizedList(new ArrayList<>());
 
             List<ProductIds> productIds = productIdsRepository.findAll();
 //            List<ProductIds> productIds = productIdsRepository.findByProductId("1228");
@@ -2036,6 +2048,7 @@ public class ProductMigrationService {
                     if (apiResponse == null || apiResponse.isEmpty()) {
                         logger.error("null or empty error while creating product id: " + id);
                         totalFailed.incrementAndGet();
+                        failedProducts2.add(id);
                         logger.info("processed product id: {}, with status :: {} , processed till now :: {}/{}", id, false, totalProcessed.get(), totalCount);
                         continue;
                     }
@@ -2061,9 +2074,9 @@ public class ProductMigrationService {
 
             String endTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
-            logger.info("Import 2 field process completed with total processed :: {}/{} with success: {}, failed: {} and started at :: {} and ended at :: {}",
+            logger.info("Import 2 field process completed with total processed :: {}/{} with success: {}, failed: {} and started at :: {} and ended at :: {} and failed products: {}",
                     totalProcessed.get(), totalCount, totalSuccess.get(), totalFailed.get(),
-                    startTime, endTime);
+                    startTime, endTime, failedProducts2);
         } catch (Exception e) {
             logger.error("Error processing the importedProduct2FieldReUpload : {}", e.getMessage(), e);
         }
@@ -2072,6 +2085,8 @@ public class ProductMigrationService {
     private List<JSONObject> process2MetafieldsSecond(JSONObject rawMetafields) {
         List<JSONObject> processedMetafields = new ArrayList<>();
 
+        addMetafield(processedMetafields, rawMetafields, "product_style_name", "single_line_text_field");
+        addMetafield(processedMetafields, rawMetafields, "product_category_name", "single_line_text_field");
         addMetafield(processedMetafields, rawMetafields, "category_feed_id", "number_integer", "opencart_category_id");
         addMetafield(processedMetafields, rawMetafields, "style_feed_id", "number_integer", "opencart_style_id");
 
@@ -2115,7 +2130,7 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_12-06-25-final-failed-reimport.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_14-06-25-final-failed-reimport_2.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://erp.abelini.com/shopify/api/product/";
     private final AtomicInteger totalProducts = new AtomicInteger(0);
@@ -2129,7 +2144,7 @@ public class ProductMigrationService {
     private final List<String> failedVariants = Collections.synchronizedList(new ArrayList<>());
 
 
-    private static final String CSV_FILE_CARAT = "src/main/resources/log/carat_variant_processing_log_12-06-25-final.csv";
+    private static final String CSV_FILE_CARAT = "src/main/resources/log/carat_variant_processing_log_14-06-25-final.csv";
     private final AtomicInteger totalProductsCarat = new AtomicInteger(0);
     private final AtomicInteger totalProductsProcessedCarat = new AtomicInteger(0);
     private final AtomicInteger productSuccessCarat = new AtomicInteger(0);
@@ -2140,7 +2155,7 @@ public class ProductMigrationService {
     private final List<String> failedProductsCarat = Collections.synchronizedList(new ArrayList<>());
     private final List<String> failedVariantsCarat = Collections.synchronizedList(new ArrayList<>());
 
-    private static final String CSV_FILE_BESTSELLER = "src/main/resources/log/bestseller_variant_processing_log_12-06-25-final.csv";
+    private static final String CSV_FILE_BESTSELLER = "src/main/resources/log/bestseller_variant_processing_log_14-06-25-final.csv";
     private final AtomicInteger totalProductsBestseller = new AtomicInteger(0);
     private final AtomicInteger totalProductsProcessedBestseller = new AtomicInteger(0);
     private final AtomicInteger productSuccessBestseller = new AtomicInteger(0);
@@ -2383,6 +2398,8 @@ public class ProductMigrationService {
             String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
             logger.info("Starting import 2 Lakh Product at: {}", startTime);
+
+            waitForErpHealth();
 
             if (isTest) {
                 List<Map<String, Object>> productList = new ArrayList<>();
@@ -3127,5 +3144,37 @@ public class ProductMigrationService {
             return null;
         }
     }
+    public void waitForErpHealth() throws InterruptedException {
+        int retryCount = 0;
+        int maxRetries = 10;
+        int waitTimeMillis = 1000;
 
+        String url = "https://erp.abelini.com/shopify/api/health_api.php";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("Authorization", jwtToken);
+
+        HttpEntity<?> entity = new HttpEntity<>(headers);
+
+        while (retryCount < maxRetries) {
+            try {
+                ResponseEntity<String> response = restTemplate.postForEntity(url, entity, String.class);
+
+                if (response.getStatusCode().is2xxSuccessful()) {
+                    logger.info("ERP Health check passed with status: {}", response.getStatusCode().value());
+                    return;
+                } else {
+                    logger.warn("ERP health check returned {}. Retrying...", response.getStatusCode().value());
+                }
+            } catch (Exception e) {
+                logger.warn("ERP health check exception: {}. Retrying...", e.getMessage());
+            }
+
+            retryCount++;
+            Thread.sleep(waitTimeMillis);
+        }
+
+        throw new RuntimeException("ERP health check failed after max retries");
+    }
 }
