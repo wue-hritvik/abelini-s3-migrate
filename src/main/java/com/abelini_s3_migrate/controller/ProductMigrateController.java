@@ -1,5 +1,6 @@
 package com.abelini_s3_migrate.controller;
 
+import com.abelini_s3_migrate.extra.ProductImport3In1Request;
 import com.abelini_s3_migrate.repo.ProductIdsRepository;
 import com.abelini_s3_migrate.service.ProductMigrationService;
 import org.slf4j.Logger;
@@ -112,10 +113,8 @@ public class ProductMigrateController {
 
     @PostMapping("/imported-all-3-script-in-1-call")
     public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
-                                            @RequestBody Set<Long> searchFailedProductIds,
-                                            @RequestBody Set<Long> caratFailedProductIds,
-                                            @RequestBody Set<Long> bestsellerFailedProductIds) {
-        migrationService.importedAll3ScriptIn1Call(isTest, searchFailedProductIds, caratFailedProductIds, bestsellerFailedProductIds);
+                                            @RequestBody ProductImport3In1Request payload){
+        migrationService.importedAll3ScriptIn1Call(isTest, payload.getSearchFailedProductIds(), payload.getCaratFailedProductIds(), payload.getBestsellerFailedProductIds());
         return "importedAll3ScriptIn1Call started successfully";
     }
 
