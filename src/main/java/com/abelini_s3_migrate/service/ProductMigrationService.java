@@ -2130,7 +2130,7 @@ public class ProductMigrationService {
         }
     }
 
-    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_14-06-25-final-failed-reimport_2.csv";
+    private static final String CSV_FILE = "src/main/resources/log/variant_processing_log_17-06-25-final-failed-reimport_3.csv";
     private static final AtomicBoolean headerWritten = new AtomicBoolean(false);
     private static final String BASE_URL = "https://erp.abelini.com/shopify/api/product/";
     private final AtomicInteger totalProducts = new AtomicInteger(0);
@@ -2144,7 +2144,7 @@ public class ProductMigrationService {
     private final List<String> failedVariants = Collections.synchronizedList(new ArrayList<>());
 
 
-    private static final String CSV_FILE_CARAT = "src/main/resources/log/carat_variant_processing_log_14-06-25-final.csv";
+    private static final String CSV_FILE_CARAT = "src/main/resources/log/carat_variant_processing_log_17-06-25-final-failed-reimport.csv";
     private final AtomicInteger totalProductsCarat = new AtomicInteger(0);
     private final AtomicInteger totalProductsProcessedCarat = new AtomicInteger(0);
     private final AtomicInteger productSuccessCarat = new AtomicInteger(0);
@@ -2155,7 +2155,7 @@ public class ProductMigrationService {
     private final List<String> failedProductsCarat = Collections.synchronizedList(new ArrayList<>());
     private final List<String> failedVariantsCarat = Collections.synchronizedList(new ArrayList<>());
 
-    private static final String CSV_FILE_BESTSELLER = "src/main/resources/log/bestseller_variant_processing_log_14-06-25-final.csv";
+    private static final String CSV_FILE_BESTSELLER = "src/main/resources/log/bestseller_variant_processing_log_17-06-25-final-failed-reimport.csv";
     private final AtomicInteger totalProductsBestseller = new AtomicInteger(0);
     private final AtomicInteger totalProductsProcessedBestseller = new AtomicInteger(0);
     private final AtomicInteger productSuccessBestseller = new AtomicInteger(0);
@@ -2764,7 +2764,7 @@ public class ProductMigrationService {
     }
 
     @Async
-    public void importedAll3ScriptIn1Call(boolean isTest, Set<Long> failedProductIds) {
+    public void importedAll3ScriptIn1Call(boolean isTest, Set<Long> failedProductIds, Set<Long> caratFailedProductIds, Set<Long> bestsellerFailedProductIds) {
         logger.info("Received request to importedAll3ScriptIn1Call");
 
         String allProductsUrl = BASE_URL + "all_products.php";
@@ -2777,8 +2777,8 @@ public class ProductMigrationService {
 
         if (isTest) {
             CompletableFuture<Void> task1 = self.imported2LakhProduct(true, failedProductIds);
-            CompletableFuture<Void> task2 = self.importedBulkCaratProduct(true);
-            CompletableFuture<Void> task3 = self.importedBulkBestsellerProduct(true);
+            CompletableFuture<Void> task2 = self.importedBulkCaratProduct(true, caratFailedProductIds);
+            CompletableFuture<Void> task3 = self.importedBulkBestsellerProduct(true, bestsellerFailedProductIds);
 
             CompletableFuture.allOf(task1, task2, task3)
                     .thenRun(() -> {
@@ -2793,8 +2793,8 @@ public class ProductMigrationService {
                     });
         } else {
             CompletableFuture<Void> task1 = self.imported2LakhProduct(false, failedProductIds);
-            CompletableFuture<Void> task2 = self.importedBulkCaratProduct(false);
-            CompletableFuture<Void> task3 = self.importedBulkBestsellerProduct(false);
+            CompletableFuture<Void> task2 = self.importedBulkCaratProduct(false, caratFailedProductIds);
+            CompletableFuture<Void> task3 = self.importedBulkBestsellerProduct(false, bestsellerFailedProductIds);
 
             CompletableFuture.allOf(task1, task2, task3)
                     .thenRun(() -> {
@@ -2811,7 +2811,7 @@ public class ProductMigrationService {
     }
 
     @Async
-    public CompletableFuture<Void> importedBulkCaratProduct(boolean isTest) {
+    public CompletableFuture<Void> importedBulkCaratProduct(boolean isTest, Set<Long> targetProductIds) {
         try {
             String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
@@ -2848,7 +2848,7 @@ public class ProductMigrationService {
                             }
                     );
 
-                    totalProductsCarat.addAndGet(productList.size());
+                    totalProductsCarat.addAndGet(targetProductIds.size());
                     // 2. For each product, loop over pages and call detail API
                     for (Map<String, Object> product : productList) {
                         try {
@@ -2858,7 +2858,7 @@ public class ProductMigrationService {
                             if (!productId.isBlank() && totalPages > 0) {
                                 Long productIdL = Long.parseLong(productId);
 
-//                                if (!targetProductIds.contains(productIdL)) continue;
+                                if (!targetProductIds.contains(productIdL)) continue;
 
                                 totalProductsProcessedCarat.incrementAndGet();
                                 Set<String> importedVarients = productCaratRepository.findVarientIdsByProductId(productId);
@@ -2978,7 +2978,7 @@ public class ProductMigrationService {
     }
 
     @Async
-    public CompletableFuture<Void> importedBulkBestsellerProduct(boolean isTest) {
+    public CompletableFuture<Void> importedBulkBestsellerProduct(boolean isTest, Set<Long> targetProductIds) {
         try {
             String startTime = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
                     .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
@@ -3015,7 +3015,7 @@ public class ProductMigrationService {
                             }
                     );
 
-                    totalProductsBestseller.addAndGet(productList.size());
+                    totalProductsBestseller.addAndGet(targetProductIds.size());
                     // 2. For each product, loop over pages and call detail API
                     for (Map<String, Object> product : productList) {
                         try {
@@ -3025,7 +3025,7 @@ public class ProductMigrationService {
                             if (!productId.isBlank() && totalPages > 0) {
                                 Long productIdL = Long.parseLong(productId);
 
-//                                if (!targetProductIds.contains(productIdL)) continue;
+                                if (!targetProductIds.contains(productIdL)) continue;
 
                                 totalProductsProcessedBestseller.incrementAndGet();
                                 Set<String> importedVarients = productBestsellerRepository.findVarientIdsByProductId(productId);

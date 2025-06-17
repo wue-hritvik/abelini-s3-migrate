@@ -20,7 +20,7 @@ public class ProductMigrateController {
     @Autowired
     private ProductIdsRepository productIdsRepository;
 
-//    @PostMapping("/upload")
+    //    @PostMapping("/upload")
 //    public ResponseEntity<String> uploadFile(@RequestParam(value = "file", required = false) MultipartFile file,
 //                                             @RequestParam(defaultValue = "0", required = false) String id) {
 //        try {
@@ -110,12 +110,14 @@ public class ProductMigrateController {
 //        return "Min Price Update Stock Product started successfully";
 //    }
 
-//    @PostMapping("/imported-all-3-script-in-1-call")
-//    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
-//                                            @RequestBody Set<Long> failedProductIds) {
-//        migrationService.importedAll3ScriptIn1Call(isTest, failedProductIds);
-//        return "importedAll3ScriptIn1Call started successfully";
-//    }
+    @PostMapping("/imported-all-3-script-in-1-call")
+    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+                                            @RequestBody Set<Long> searchFailedProductIds,
+                                            @RequestBody Set<Long> caratFailedProductIds,
+                                            @RequestBody Set<Long> bestsellerFailedProductIds) {
+        migrationService.importedAll3ScriptIn1Call(isTest, searchFailedProductIds, caratFailedProductIds, bestsellerFailedProductIds);
+        return "importedAll3ScriptIn1Call started successfully";
+    }
 
     @GetMapping("/import/summary")
     public ResponseEntity<String> getImportSummaries() {
