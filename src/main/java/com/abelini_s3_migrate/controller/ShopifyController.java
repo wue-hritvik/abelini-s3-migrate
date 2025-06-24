@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
+import java.util.Objects;
 
 @RestController
 @RequestMapping("/shopify")
@@ -27,22 +28,31 @@ public class ShopifyController {
         this.shopifyFileFetcherService = shopifyFileFetcherService;
     }
 
-//    @PostMapping("/3/migrate")
-//    public String migrateImages(@RequestParam(required = false) String path) {
+    @PostMapping("/3/migrate")
+    public String migrateImages(@RequestParam(required = false) String path) {
 //        String csvPath;
 //        if (path == null) {
 //            csvPath = "src/main/resources/s3file/s3_url_list.csv";
 //        } else {
 //            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
 //        }
-//        try {
-//            shopifyService.uploadImagesToShopify(csvPath);
-//            return "Migration started!";
-//        } catch (IOException | CsvException e) {
-//            return "Error: " + e.getMessage();
-//        }
-//    }
-//
+        try {
+            shopifyService.uploadImagesToShopify(path);
+            return "Migration started!";
+        } catch (Exception e) {
+            return "Error: " + e.getMessage();
+        }
+    }
+
+    @GetMapping("/image/import/summary")
+    public ResponseEntity<String> getImportSummaries() {
+        String summary = shopifyService.printSummary();
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(summary);
+    }
+
 ////    @PostMapping("s3upload")
 ////    public String s3Upload(@RequestBody String path) {
 ////        try {
@@ -52,14 +62,14 @@ public class ShopifyController {
 ////        }
 ////    }
 //
-//    @PostMapping("/2/generate-csv")
-//    public String generateCsv(@RequestParam(required = false) String fileName,
-//                              @RequestParam(defaultValue = "false") boolean onlySupportedFile) {
-//        String name;
-//        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), "s3_url_list");
-//        s3Service.exportS3ImagesToCSV(name, onlySupportedFile);
-//        return "CSV file generation started! and fileName will be: " + name + ".csv";
-//    }
+    @PostMapping("/2/generate-csv")
+    public String generateCsv(@RequestParam(required = false) String fileName,
+                              @RequestParam(defaultValue = "false") boolean onlySupportedFile) {
+        String name;
+        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), "s3_url_list");
+        s3Service.exportS3ImagesToCSV(name, onlySupportedFile);
+        return "CSV file generation started! and fileName will be: " + name + ".csv";
+    }
 //
 ////    @GetMapping("/1/rename-files")
 ////    public String renameFiles() {

@@ -31,12 +31,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import static com.abelini_s3_migrate.service.ProductMigrationService.API_COST_PER_CALL;
+import static com.abelini_s3_migrate.service.ProductMigrationService.remainingPoints;
+
 @Service
 public class ShopifyService {
     private static final Logger logger = LoggerFactory.getLogger(ShopifyService.class);
     private final RestTemplate restTemplate = new RestTemplate();
     private final Tika tika = new Tika();
     private final ObjectMapper objectMapper;
+    private final ProductMigrationService productMigrationService;
 
     @Value("${shopify_store}")
     private String shopifyStore;
@@ -56,27 +60,51 @@ public class ShopifyService {
         }
     }
 
-    private static final int MAX_CONCURRENT_BATCHES = 10;
+    private static final int MAX_CONCURRENT_BATCHES = 25;
     private static final Semaphore semaphore = new Semaphore(MAX_CONCURRENT_BATCHES);
     private final AtomicInteger totalProcessed = new AtomicInteger(0);
-    private static final int API_COST_PER_CALL = 40;
+    //    private static final int API_COST_PER_CALL = 40;
     private static final int MAX_POINTS = 20000;
     private static final int RECOVERY_RATE = 1000;
     private static final int SAFE_THRESHOLD = 2000;
-    private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
+//    private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
 
-    private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
+//    private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
 
-    public ShopifyService(ObjectMapper objectMapper) {
+    public ShopifyService(ObjectMapper objectMapper, ProductMigrationService productMigrationService) {
         this.objectMapper = objectMapper;
-        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
-            int currentPoints = remainingPoints.get();
-            if (currentPoints < MAX_POINTS) {
-                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
-                remainingPoints.addAndGet(newPoints);
-                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
-            }
-        }, 1, 1, TimeUnit.SECONDS);
+        this.productMigrationService = productMigrationService;
+//        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
+//            int currentPoints = remainingPoints.get();
+//            if (currentPoints < MAX_POINTS) {
+//                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
+//                remainingPoints.addAndGet(newPoints);
+//                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
+//            }
+//        }, 1, 1, TimeUnit.SECONDS);
+    }
+
+    private final AtomicInteger totalUrlsP = new AtomicInteger(0);
+    private final AtomicInteger totalBatchesP = new AtomicInteger(0);
+    private final AtomicInteger batchesProcessedP = new AtomicInteger(0);
+    private final AtomicInteger batchesSucceededP = new AtomicInteger(0);
+    private final AtomicInteger batchesFailedP = new AtomicInteger(0);
+    private final AtomicInteger urlsSucceededP = new AtomicInteger(0);
+    private final AtomicInteger urlsFailedP = new AtomicInteger(0);
+
+    public String printSummary() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("\n======= BULK UPLOAD SUMMARY =======\n");
+        sb.append(String.format("Total URLs Found         : %d%n", totalUrlsP.get()));
+        sb.append(String.format("Total Batches to Process : %d%n", totalBatchesP.get()));
+        sb.append(String.format("Batches Processed        : %d%n", batchesProcessedP.get()));
+        sb.append(String.format("Batches Succeeded        : %d%n", batchesSucceededP.get()));
+        sb.append(String.format("Batches Failed           : %d%n", batchesFailedP.get()));
+        sb.append(String.format("URLs Uploaded Successfully: %d%n", urlsSucceededP.get()));
+        sb.append(String.format("URLs Failed              : %d%n", urlsFailedP.get()));
+        sb.append("===================================\n");
+        System.out.print(sb);
+        return sb.toString();
     }
 
     @Async
@@ -86,8 +114,11 @@ public class ShopifyService {
         List<String> imageUrls = readCSV(csvFilePath);
         logger.info("Total URLs count: {}", imageUrls.size());
 
+        totalUrlsP.set(imageUrls.size());
+
         int batchSize = 50;
         int totalBatches = (int) Math.ceil((double) imageUrls.size() / batchSize);
+        totalBatchesP.set(totalBatches);
 
         ExecutorService executorService = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
 
@@ -100,10 +131,18 @@ public class ShopifyService {
             futures.add(executorService.submit(() -> {
                 try {
                     semaphore.acquire();
-                    regulateApiRate();
+                    productMigrationService.regulateApiRate();
                     logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
                     remainingPoints.addAndGet(-API_COST_PER_CALL);
+                    batchesProcessedP.incrementAndGet();
                     int count = registerBatchInShopify(batch);
+                    if (count == 0) {
+                        batchesFailedP.incrementAndGet();
+                        urlsFailedP.addAndGet(batch.size());
+                    } else {
+                        batchesSucceededP.incrementAndGet();
+                        urlsSucceededP.addAndGet(batch.size());
+                    }
 
                     int processed = totalProcessed.addAndGet(count);
                     logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, processed, imageUrls.size());
@@ -162,25 +201,25 @@ public class ShopifyService {
         logger.info("Bulk upload completed. Total images processed: {}, ended at :: {}", totalProcessed.get(), ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
     }
 
-    private void regulateApiRate() {
-        int maxWaitTime = 10; // Maximum wait time in seconds
-        int waitTime = 0;
-
-        while (remainingPoints.get() < SAFE_THRESHOLD) {
-            if (waitTime >= maxWaitTime) {
-                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
-                break;
-            }
-            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
-            try {
-                Thread.sleep(1000); // Wait 1 second for recovery
-                waitTime++;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
+//    private void regulateApiRate() {
+//        int maxWaitTime = 10; // Maximum wait time in seconds
+//        int waitTime = 0;
+//
+//        while (remainingPoints.get() < SAFE_THRESHOLD) {
+//            if (waitTime >= maxWaitTime) {
+//                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
+//                break;
+//            }
+//            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
+//            try {
+//                Thread.sleep(1000); // Wait 1 second for recovery
+//                waitTime++;
+//            } catch (InterruptedException e) {
+//                Thread.currentThread().interrupt();
+//                break;
+//            }
+//        }
+//    }
 
     public int registerBatchInShopify(List<String> fileUrls) {
         List<Map<String, String>> filesList = new ArrayList<>();
