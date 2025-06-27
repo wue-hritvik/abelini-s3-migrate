@@ -91,17 +91,19 @@ public class ShopifyService {
     private final AtomicInteger batchesFailedP = new AtomicInteger(0);
     private final AtomicInteger urlsSucceededP = new AtomicInteger(0);
     private final AtomicInteger urlsFailedP = new AtomicInteger(0);
+    List<String> failedBatchesP = Collections.synchronizedList(new ArrayList<>());
 
     public String printSummary() {
         StringBuilder sb = new StringBuilder();
-        sb.append("\n======= BULK UPLOAD SUMMARY =======\n");
-        sb.append(String.format("Total URLs Found         : %d%n", totalUrlsP.get()));
-        sb.append(String.format("Total Batches to Process : %d%n", totalBatchesP.get()));
-        sb.append(String.format("Batches Processed        : %d%n", batchesProcessedP.get()));
-        sb.append(String.format("Batches Succeeded        : %d%n", batchesSucceededP.get()));
-        sb.append(String.format("Batches Failed           : %d%n", batchesFailedP.get()));
-        sb.append(String.format("URLs Uploaded Successfully: %d%n", urlsSucceededP.get()));
-        sb.append(String.format("URLs Failed              : %d%n", urlsFailedP.get()));
+        sb.append("\n======= BULK IMAGE UPLOAD SUMMARY =======\n");
+        sb.append(String.format("Total URLs Count         : %d%n", totalUrlsP.get()));
+        sb.append(String.format("Total Batches Count      : %d%n", totalBatchesP.get()));
+        sb.append(String.format("Batches Processed Count  : %d%n", batchesProcessedP.get()));
+        sb.append(String.format("Batches Succeeded Count  : %d%n", batchesSucceededP.get()));
+        sb.append(String.format("Batches Failed Count     : %d%n", batchesFailedP.get()));
+        sb.append(String.format("Batches Failed No. List  : %s%n", failedBatchesP));
+        sb.append(String.format("URLs Success Count       : %d%n", urlsSucceededP.get()));
+        sb.append(String.format("URLs Failed Count        : %d%n", urlsFailedP.get()));
         sb.append("===================================\n");
         System.out.print(sb);
         return sb.toString();
@@ -139,6 +141,7 @@ public class ShopifyService {
                     if (count == 0) {
                         batchesFailedP.incrementAndGet();
                         urlsFailedP.addAndGet(batch.size());
+                        failedBatchesP.add(String.valueOf(batchNumber));
                     } else {
                         batchesSucceededP.incrementAndGet();
                         urlsSucceededP.addAndGet(batch.size());
