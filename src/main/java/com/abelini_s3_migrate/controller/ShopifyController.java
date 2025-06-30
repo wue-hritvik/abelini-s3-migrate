@@ -30,7 +30,9 @@ public class ShopifyController {
     }
 
     @PostMapping("/3/migrate")
-    public String migrateImages(@RequestParam(required = false) String path,@RequestBody Set<Integer> failedBatch) {
+    public String migrateImages(@RequestParam(required = false) String path,
+                                @RequestParam (required = false, defaultValue = "true")boolean isFailed,
+                                @RequestBody Set<Integer> failedBatch) {
 //        String csvPath;
 //        if (path == null) {
 //            csvPath = "src/main/resources/s3file/s3_url_list.csv";
@@ -38,7 +40,7 @@ public class ShopifyController {
 //            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
 //        }
         try {
-            shopifyService.uploadImagesToShopify(path, failedBatch);
+            shopifyService.uploadImagesToShopify(path, failedBatch, isFailed);
             return "Migration started!";
         } catch (Exception e) {
             return "Error: " + e.getMessage();

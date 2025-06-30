@@ -110,18 +110,16 @@ public class ShopifyService {
     }
 
     @Async
-    public void uploadImagesToShopify(String csvFilePath, Set<Integer> failedBatch) throws IOException, CsvException {
+    public void uploadImagesToShopify(String csvFilePath, Set<Integer> failedBatch, boolean isFailed) throws IOException, CsvException {
         logger.info("Starting bulk upload to Shopify... started at :: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 
         List<String> imageUrls = readCSV(csvFilePath);
-//        logger.info("Total URLs count: {}", imageUrls.size());
-//
-//        totalUrlsP.set(imageUrls.size());
-        totalUrlsP.set(failedBatch.size()*50);
 
         int batchSize = 50;
-//        int totalBatches = (int) Math.ceil((double) imageUrls.size() / batchSize);
-        int totalBatches = failedBatch.size();
+        int total = isFailed ? failedBatch.size() * batchSize : imageUrls.size();
+        logger.info("Total URLs count: {}", total);
+        totalUrlsP.set(total);
+        int totalBatches = (int) Math.ceil((double) total / batchSize);
         totalBatchesP.set(totalBatches);
 
         ExecutorService executorService = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
@@ -130,7 +128,7 @@ public class ShopifyService {
 
         for (int i = 0; i < imageUrls.size(); i += batchSize) {
             final int batchNumber = (i / batchSize) + 1;
-            if (!failedBatch.contains(batchNumber)) continue;
+            if (isFailed && !failedBatch.contains(batchNumber)) continue;
             final List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
             logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
             futures.add(executorService.submit(() -> {
