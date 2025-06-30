@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
 import java.util.Objects;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/shopify")
@@ -29,7 +30,7 @@ public class ShopifyController {
     }
 
     @PostMapping("/3/migrate")
-    public String migrateImages(@RequestParam(required = false) String path) {
+    public String migrateImages(@RequestParam(required = false) String path,@RequestBody Set<Integer> failedBatch) {
 //        String csvPath;
 //        if (path == null) {
 //            csvPath = "src/main/resources/s3file/s3_url_list.csv";
@@ -37,7 +38,7 @@ public class ShopifyController {
 //            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
 //        }
         try {
-            shopifyService.uploadImagesToShopify(path);
+            shopifyService.uploadImagesToShopify(path, failedBatch);
             return "Migration started!";
         } catch (Exception e) {
             return "Error: " + e.getMessage();
@@ -103,11 +104,11 @@ public class ShopifyController {
 //        return "success";
 //    }
 //
-//    @GetMapping("export/file-names")
-//    public String exportFileNamesFromShopify(){
-//        shopifyFileFetcherService.fetchAndStoreShopifyFiles();
-//        return "export file names from shopify started";
-//    }
+    @GetMapping("export/file-names")
+    public String exportFileNamesFromShopify(){
+        shopifyFileFetcherService.fetchAndStoreShopifyFiles();
+        return "export file names from shopify started";
+    }
 //
 //    @GetMapping("export/file-names/bulk")
 //    public String exportFileNamesFromShopifyBulk(){
@@ -115,10 +116,10 @@ public class ShopifyController {
 //        return "export file names from shopify bulk started";
 //    }
 //
-//    @GetMapping("compare/files-names")
-//    public String compareFileNames(){
-//        shopifyFileFetcherService.compareFileNames();
-//        return "compare file names started";
-//    }
+    @GetMapping("compare/files-names")
+    public String compareFileNames(){
+        shopifyFileFetcherService.compareFileNames();
+        return "compare file names started";
+    }
 
 }

@@ -28,8 +28,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
+import static com.abelini_s3_migrate.service.ProductMigrationService.API_COST_PER_CALL;
+import static com.abelini_s3_migrate.service.ProductMigrationService.remainingPoints;
+
 @Service
 public class ShopifyFileFetcherService {
+
+    private final ProductMigrationService productMigrationService;
 
     @Value("${shopify_store}")
     private String shopifyStore;
@@ -37,13 +42,13 @@ public class ShopifyFileFetcherService {
     @Value("${shopify_access_token_2}")
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
-    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_26-03.csv";
+    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_30-06-25.csv";
     private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_export_26-03.csv";
-    private static final int API_COST_PER_CALL = 35;
+//    private static final int API_COST_PER_CALL = 35;
     private static final int MAX_POINTS = 20000;
     private static final int RECOVERY_RATE = 1000;
     private static final int SAFE_THRESHOLD = 2000;
-    private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
+//    private static final AtomicInteger remainingPoints = new AtomicInteger(MAX_POINTS);
     private static final AtomicInteger totalFilesStored = new AtomicInteger(0);
     private static final AtomicInteger batchNumber = new AtomicInteger(1); // AtomicInteger for thread-safe batch number
     private static final Logger LOGGER = Logger.getLogger(ShopifyFileFetcherService.class.getName());
@@ -52,21 +57,22 @@ public class ShopifyFileFetcherService {
     private final ThreadPoolTaskExecutor taskExecutor;
     private final ScheduledExecutorService creditRecoveryScheduler = Executors.newScheduledThreadPool(1);
 
-    public ShopifyFileFetcherService(ThreadPoolTaskExecutor taskExecutor) {
+    public ShopifyFileFetcherService(ThreadPoolTaskExecutor taskExecutor, ProductMigrationService productMigrationService) {
         this.taskExecutor = taskExecutor = new ThreadPoolTaskExecutor();
+        this.productMigrationService = productMigrationService;
         taskExecutor.setCorePoolSize(10);
         taskExecutor.setMaxPoolSize(20);
         taskExecutor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
         taskExecutor.initialize();
 
-        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
-            int currentPoints = remainingPoints.get();
-            if (currentPoints < MAX_POINTS) {
-                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
-                remainingPoints.addAndGet(newPoints);
-                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
-            }
-        }, 1, 1, TimeUnit.SECONDS);
+//        creditRecoveryScheduler.scheduleAtFixedRate(() -> {
+//            int currentPoints = remainingPoints.get();
+//            if (currentPoints < MAX_POINTS) {
+//                int newPoints = Math.min(RECOVERY_RATE, MAX_POINTS - currentPoints);
+//                remainingPoints.addAndGet(newPoints);
+//                logger.debug("Recovered {} API points. Current points: {}", newPoints, remainingPoints.get());
+//            }
+//        }, 1, 1, TimeUnit.SECONDS);
     }
 
     @Async
@@ -91,7 +97,7 @@ public class ShopifyFileFetcherService {
 
             String query = """
                     {
-                      files(first: 250, query: "filename:'*.mp4'"%s) {
+                      files(first: 250, query: "created_at:>=2025-06-29"%s) {
                         edges {
                           node {
                             alt
@@ -112,6 +118,10 @@ public class ShopifyFileFetcherService {
                     """.formatted(afterClause);
 
             try {
+
+                productMigrationService.regulateApiRate();
+                remainingPoints.addAndGet(-API_COST_PER_CALL);
+
                 JSONObject response = executeGraphQLQuery(query);
                 logger.info("shopify api response ::: {}", response);
 
@@ -154,8 +164,6 @@ public class ShopifyFileFetcherService {
 
 
                 LOGGER.info("Total files stored so far: " + totalFilesStored.get());
-
-                regulateApiRate();
 
                 // Write to CSV every 5 batches
                 if (currentBatchNumber % 5 == 0) {
@@ -211,7 +219,6 @@ public class ShopifyFileFetcherService {
             LOGGER.info("X-Request-ID: " + requestId);
             LOGGER.info("Response Body: " + responseBody);
 
-            remainingPoints.addAndGet(-API_COST_PER_CALL);
             return new JSONObject(responseBody);
 
         } catch (HttpClientErrorException e) {
@@ -234,25 +241,25 @@ public class ShopifyFileFetcherService {
         }
     }
 
-    private void regulateApiRate() {
-        int maxWaitTime = 10; // Maximum wait time in seconds
-        int waitTime = 0;
-
-        while (remainingPoints.get() < SAFE_THRESHOLD) {
-            if (waitTime >= maxWaitTime) {
-                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
-                break;
-            }
-            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
-            try {
-                Thread.sleep(1000); // Wait 1 second for recovery
-                waitTime++;
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
-    }
+//    private void regulateApiRate() {
+//        int maxWaitTime = 10; // Maximum wait time in seconds
+//        int waitTime = 0;
+//
+//        while (remainingPoints.get() < SAFE_THRESHOLD) {
+//            if (waitTime >= maxWaitTime) {
+//                logger.warn("API points still low after waiting {} seconds. Continuing anyway.", maxWaitTime);
+//                break;
+//            }
+//            logger.info("Low API points ({}), pausing until recovery...", remainingPoints.get());
+//            try {
+//                Thread.sleep(1000); // Wait 1 second for recovery
+//                waitTime++;
+//            } catch (InterruptedException e) {
+//                Thread.currentThread().interrupt();
+//                break;
+//            }
+//        }
+//    }
 
     @Async
     public void fetchAndStoreShopifyFilesBulk() {
@@ -478,9 +485,9 @@ public class ShopifyFileFetcherService {
         }
     }
 
-    private static final String S3_CSV_PATH = "src/main/resources/s3file/missing_avif_mp4_04_03.csv";
-    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_26-03.csv";
-    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_links_26-03.csv";
+    private static final String S3_CSV_PATH = "src/main/resources/s3file/urls_after_26_march_renamed.csv";
+    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_30-06-25.csv";
+    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_links_30-06-25.csv";
     private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
     private static final String IMAGE_FILES_CSV = "src/main/resources/s3file/image_s3_urls.csv";
 
@@ -881,17 +888,17 @@ public class ShopifyFileFetcherService {
     public boolean isSupportedImage(String fileUrl) {
         String lowerUrl = fileUrl.toLowerCase();
         // Quick check based on file extension.
-//        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
-//                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
-//            return true;
-//        }
-//        if (lowerUrl.endsWith(".avif") || lowerUrl.endsWith(".mp4")) {
-//            return true;
-//        }
-        return lowerUrl.endsWith(".mp4");
+        if (lowerUrl.endsWith(".png") || lowerUrl.endsWith(".jpg") || lowerUrl.endsWith(".jpeg") ||
+                lowerUrl.endsWith(".gif") || lowerUrl.endsWith(".webp") || lowerUrl.endsWith(".svg")) {
+            return true;
+        }
+        if (lowerUrl.endsWith(".avif") || lowerUrl.endsWith(".mp4")) {
+            return true;
+        }
+//        return lowerUrl.endsWith(".mp4");
         // Fallback: detect MIME type.
-//        String mimeType = detectMimeType(fileUrl);
-//        return SUPPORTED_IMAGE_MIME_TYPES.contains(mimeType);
+        String mimeType = detectMimeType(fileUrl);
+        return SUPPORTED_IMAGE_MIME_TYPES.contains(mimeType);
     }
 
     /**
