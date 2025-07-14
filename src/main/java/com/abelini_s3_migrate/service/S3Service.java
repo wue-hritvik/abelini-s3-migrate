@@ -75,7 +75,11 @@ public class S3Service {
                 ListObjectsV2Response result = s3.listObjectsV2(requestBuilder.build());
 
                 for (S3Object object : result.contents()) {
-                    String url = "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + object.key();
+                    String key = object.key();
+                    if (key.equals("file_s3_batch_operation.csv") || key.equals("rename-manifest.csv")) {
+                        continue;
+                    }
+                    String url = "https://" + bucketName + ".s3." + region + ".amazonaws.com/" + key;
                     writer.writeNext(new String[]{url});
                 }
 

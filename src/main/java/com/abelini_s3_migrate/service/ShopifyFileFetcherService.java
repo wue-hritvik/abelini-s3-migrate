@@ -42,7 +42,7 @@ public class ShopifyFileFetcherService {
     @Value("${shopify_access_token_2}")
     private String ACCESS_TOKEN;
     private final String SHOPIFY_GRAPHQL_URL = "/admin/api/2025-01/graphql.json";
-    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_30-06-25-01.csv";
+    private static final String CSV_FILE_PATH = "src/main/resources/s3file/shopify_filename_export_all_14-07-25.csv";
     private static final String CSV_FILE_PATH_BULK = "src/main/resources/s3file/shopify_filename_bulk_export_26-03.csv";
 //    private static final int API_COST_PER_CALL = 35;
     private static final int MAX_POINTS = 20000;
@@ -97,7 +97,7 @@ public class ShopifyFileFetcherService {
 
             String query = """
                     {
-                     files(first: 250, query: "created_at:>=2025-06-30"%s, sortKey: CREATED_AT) {
+                     files(first: 250%s) {
                         edges {
                           node {
                             alt
@@ -485,9 +485,9 @@ public class ShopifyFileFetcherService {
         }
     }
 
-    private static final String S3_CSV_PATH = "src/main/resources/s3file/missing_links_30-06-25.csv";
-    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_30-06-25-01.csv";
-    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_links_30-06-25-01.csv";
+    private static final String S3_CSV_PATH = "src/main/resources/s3file/s3_export_all_14-07-25.csv";
+    private static final String BULK_CSV_PATH = "src/main/resources/s3file/shopify_filename_export_all_14-07-25.csv";
+    private static final String MISSING_URLS_CSV = "src/main/resources/s3file/missing_links_all_14-07-25.csv";
     private static final String OTHER_FILES_CSV = "src/main/resources/s3file/other_file_s3_urls.csv";
     private static final String IMAGE_FILES_CSV = "src/main/resources/s3file/image_s3_urls.csv";
 
