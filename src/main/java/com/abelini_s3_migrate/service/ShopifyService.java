@@ -228,10 +228,10 @@ public class ShopifyService {
     public int registerBatchInShopify(List<String> fileUrls) {
         List<Map<String, String>> filesList = new ArrayList<>();
         for (String fileUrl : fileUrls) {
+            if (notSupportedFileType(fileUrl)) continue;
             String encodedUrl = encodeUrl(fileUrl);
             String fileName = generateShopifyFilePath(fileUrl);
             String contentType = detectShopifyContentType(fileUrl);
-            if (notSupportedFileType(fileUrl)) continue;
 //            logger.info("contentType ::: {}", contentType);
             Map<String, String> fileEntry = new HashMap<>();
             fileEntry.put("originalSource", encodedUrl);
@@ -285,8 +285,8 @@ public class ShopifyService {
     }
 
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
-            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml",
-            "image/avif", "video/mp4"
+            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+//            , "image/avif", "video/mp4"
     );
 
     private boolean notSupportedFileType(String fileUrl) {

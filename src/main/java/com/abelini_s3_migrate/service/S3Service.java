@@ -1,6 +1,7 @@
 package com.abelini_s3_migrate.service;
 
 import com.opencsv.CSVWriter;
+import org.apache.tika.Tika;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -24,6 +25,7 @@ import java.net.URL;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Set;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -43,10 +45,12 @@ public class S3Service {
     @Value("${aws_secret_key}")
     private String secretKey;
     private final Executor executor;
+    private final Tika tika;
 
-    public S3Service(@Qualifier("s3TaskExecutor") Executor executor) {
+    public S3Service(@Qualifier("s3TaskExecutor") Executor executor, Tika tika) {
 
         this.executor = executor;
+        this.tika = tika;
     }
 
     @Async
@@ -186,6 +190,9 @@ public class S3Service {
                 if (line.trim().isEmpty()) continue;
 
                 String s3Url = line.replaceAll("\"", "").trim(); // clean quotes
+
+                if (notSupportedFileType(s3Url)) continue;
+
                 URL url = new URL(s3Url);
 
                 String host = url.getHost(); // e.g., abelini-images.s3.eu-west-2.amazonaws.com
@@ -212,5 +219,25 @@ public class S3Service {
         }
         logger.info("Completed file renames... ended at :: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
         logger.info("Optimized renaming and copying to '" + destinationBucket + "' completed!");
+    }
+
+    private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
+//            "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
+//            ,
+            "image/avif", "video/mp4"
+    );
+
+    private boolean notSupportedFileType(String fileUrl) {
+        String mimeType = detectMimeType(fileUrl);
+        return !SUPPORTED_IMAGE_MIME_TYPES.contains(mimeType);
+    }
+
+    private String detectMimeType(String filename) {
+        try {
+            return tika.detect(filename);
+        } catch (Exception e) {
+            logger.warn("Could not detect MIME type for {}. Defaulting to image/jpeg", filename);
+            return "image/jpeg";
+        }
     }
 }
