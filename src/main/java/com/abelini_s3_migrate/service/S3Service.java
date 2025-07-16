@@ -168,8 +168,8 @@ public class S3Service {
 
     @Async
     public void renameAndCopyFiles() {
-        String csvPath = "src/main/resources/s3file/missing_links_all_14-07-25.csv";
-        String destinationBucket = "renamed-object-till-14-july-25";
+        String csvPath = "";
+        String destinationBucket = "";
 
         logger.info("Starting rename file names started at :: {}", ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z")));
 

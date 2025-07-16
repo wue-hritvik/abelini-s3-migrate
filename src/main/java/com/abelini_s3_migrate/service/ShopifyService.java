@@ -286,7 +286,7 @@ public class ShopifyService {
 
     private static final Set<String> SUPPORTED_IMAGE_MIME_TYPES = Set.of(
             "image/png", "image/jpeg", "image/gif", "image/jpg", "image/webp", "image/svg+xml"
-//            , "image/avif", "video/mp4"
+            , "image/avif", "video/mp4"
     );
 
     private boolean notSupportedFileType(String fileUrl) {
