@@ -45,12 +45,11 @@ public class S3Service {
     @Value("${aws_secret_key}")
     private String secretKey;
     private final Executor executor;
-    private final Tika tika;
+    private final Tika tika = new Tika();
 
-    public S3Service(@Qualifier("s3TaskExecutor") Executor executor, Tika tika) {
+    public S3Service(@Qualifier("s3TaskExecutor") Executor executor) {
 
         this.executor = executor;
-        this.tika = tika;
     }
 
     @Async
