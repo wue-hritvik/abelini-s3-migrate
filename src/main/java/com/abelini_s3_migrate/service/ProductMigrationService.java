@@ -3322,6 +3322,8 @@ public class ProductMigrationService {
                             }
                         """, cursor);
 
+                regulateApiRate();
+                remainingPoints.addAndGet(-API_COST_PER_CALL);
                 String response = sendGraphQLRequest(query, "{}", false);
                 if (response == null) break;
 
@@ -3363,6 +3365,8 @@ public class ProductMigrationService {
             variables.put("customerId", customerId);
             variables.put("address", addressInput);
 
+            regulateApiRate();
+            remainingPoints.addAndGet(-API_COST_PER_CALL);
             String response = sendGraphQLRequest(mutation, objectMapper.writeValueAsString(variables), null);
             if (response == null) logger.error("Failed to create address for customer: {}", customerId);
         } catch (Exception e) {
