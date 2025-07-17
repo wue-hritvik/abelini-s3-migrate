@@ -30,32 +30,32 @@ public class ShopifyController {
         this.shopifyFileFetcherService = shopifyFileFetcherService;
     }
 
-    @PostMapping("/3/migrate")
-    public String migrateImages(@RequestParam(required = false) String path,
-                                @RequestParam(required = false, defaultValue = "true") boolean isFailed,
-                                @RequestBody Set<Integer> failedBatch) {
-//        String csvPath;
-//        if (path == null) {
-//            csvPath = "src/main/resources/s3file/s3_url_list.csv";
-//        } else {
-//            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
+//    @PostMapping("/3/migrate")
+//    public String migrateImages(@RequestParam(required = false) String path,
+//                                @RequestParam(required = false, defaultValue = "true") boolean isFailed,
+//                                @RequestBody Set<Integer> failedBatch) {
+////        String csvPath;
+////        if (path == null) {
+////            csvPath = "src/main/resources/s3file/s3_url_list.csv";
+////        } else {
+////            csvPath = "src/main/resources/s3file/" + path.replace(".csv", "") + ".csv";
+////        }
+//        try {
+//            shopifyService.uploadImagesToShopify(path, failedBatch, isFailed);
+//            return "Migration started!";
+//        } catch (Exception e) {
+//            return "Error: " + e.getMessage();
 //        }
-        try {
-            shopifyService.uploadImagesToShopify(path, failedBatch, isFailed);
-            return "Migration started!";
-        } catch (Exception e) {
-            return "Error: " + e.getMessage();
-        }
-    }
-
-    @GetMapping("/image/import/summary")
-    public ResponseEntity<String> getImportSummaries() {
-        String summary = shopifyService.printSummary();
-
-        return ResponseEntity.ok()
-                .contentType(MediaType.TEXT_PLAIN)
-                .body(summary);
-    }
+//    }
+//
+//    @GetMapping("/image/import/summary")
+//    public ResponseEntity<String> getImportSummaries() {
+//        String summary = shopifyService.printSummary();
+//
+//        return ResponseEntity.ok()
+//                .contentType(MediaType.TEXT_PLAIN)
+//                .body(summary);
+//    }
 
     ////    @PostMapping("s3upload")
 ////    public String s3Upload(@RequestBody String path) {
@@ -66,21 +66,21 @@ public class ShopifyController {
 ////        }
 ////    }
 //
-    @PostMapping("/2/generate-csv")
-    public String generateCsv(@RequestParam(required = false) String fileName,
-                              @RequestParam(defaultValue = "false") boolean onlySupportedFile,
-                              @RequestParam(defaultValue = "abelini-images", required = false) String bucketName) {
-        String name;
-        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), UUID.randomUUID().toString());
-        s3Service.exportS3ImagesToCSV(name, onlySupportedFile, bucketName);
-        return "CSV file generation started! and fileName will be: " + name + ".csv";
-    }
+//    @PostMapping("/2/generate-csv")
+//    public String generateCsv(@RequestParam(required = false) String fileName,
+//                              @RequestParam(defaultValue = "false") boolean onlySupportedFile,
+//                              @RequestParam(defaultValue = "abelini-images", required = false) String bucketName) {
+//        String name;
+//        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), UUID.randomUUID().toString());
+//        s3Service.exportS3ImagesToCSV(name, onlySupportedFile, bucketName);
+//        return "CSV file generation started! and fileName will be: " + name + ".csv";
+//    }
 
-    @GetMapping("/1/rename-files")
-    public String renameFiles() {
-        s3Service.renameAndCopyFiles();
-        return "Bulk file renaming and copying started!";
-    }
+//    @GetMapping("/1/rename-files")
+//    public String renameFiles() {
+//        s3Service.renameAndCopyFiles();
+//        return "Bulk file renaming and copying started!";
+//    }
 
     @GetMapping("/download-csv")
     public ResponseEntity<?> downloadCsvFile(@RequestParam String path) {
@@ -109,11 +109,11 @@ public class ShopifyController {
 //        return "success";
 //    }
 //
-    @GetMapping("export/file-names")
-    public String exportFileNamesFromShopify() {
-        shopifyFileFetcherService.fetchAndStoreShopifyFiles();
-        return "export file names from shopify started";
-    }
+//    @GetMapping("export/file-names")
+//    public String exportFileNamesFromShopify() {
+//        shopifyFileFetcherService.fetchAndStoreShopifyFiles();
+//        return "export file names from shopify started";
+//    }
 
     //
 //    @GetMapping("export/file-names/bulk")
@@ -122,10 +122,10 @@ public class ShopifyController {
 //        return "export file names from shopify bulk started";
 //    }
 //
-    @GetMapping("compare/files-names")
-    public String compareFileNames() {
-        shopifyFileFetcherService.compareFileNames();
-        return "compare file names started";
-    }
+//    @GetMapping("compare/files-names")
+//    public String compareFileNames() {
+//        shopifyFileFetcherService.compareFileNames();
+//        return "compare file names started";
+//    }
 
 }

@@ -36,6 +36,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -43,6 +45,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
@@ -295,10 +298,12 @@ public class ProductMigrationService {
         return result;
     }
 
-    private String sendGraphQLRequest(String query, String variables, boolean is24) {
+    private String sendGraphQLRequest(String query, String variables, Boolean is24) {
         try {
-            String url = "";
-            if (is24) {
+            String url;
+            if (is24 == null) {
+                url = shopifyStore + "/admin/api/2025-07/graphql.json";
+            } else if (is24) {
                 url = shopifyStore + "/admin/api/2024-04/graphql.json";
             } else {
                 url = shopifyStore + "/admin/api/2025-01/graphql.json";
@@ -1088,7 +1093,7 @@ public class ProductMigrationService {
     private void addProcessedMetafield(List<JSONObject> metafields, JSONObject rawMetafields, String key, String option, String type, String metafieldKey, BiFunction<Object, Object, Object> processor) throws JsonProcessingException {
         logger.info("checking for processed meta fields :: {} :: {}", key, option);
         if (rawMetafields.has(key) && !rawMetafields.isNull(key) &&
-                rawMetafields.has(option) && !rawMetafields.isNull(option)) {
+            rawMetafields.has(option) && !rawMetafields.isNull(option)) {
             logger.info("checking for success processed meta fields :: {} :: {}", key, option);
             JSONObject metafield = new JSONObject();
             metafield.put("namespace", "custom");
@@ -3144,6 +3149,7 @@ public class ProductMigrationService {
             return null;
         }
     }
+
     public void waitForErpHealth() throws InterruptedException {
         int retryCount = 0;
         int maxRetries = 10;
@@ -3177,4 +3183,225 @@ public class ProductMigrationService {
 
         throw new RuntimeException("ERP health check failed after max retries");
     }
+
+    @Async
+    public void addDummyAddressesAsync() {
+        String start = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+        logger.info("Starting addDummyAddressesAsync... at " + start);
+        Instant startTime = Instant.now();
+
+        Map<String, String> customerEmailIdMap = fetchAllCustomersFromShopify();
+        logger.info("Fetched {} customers from Shopify", customerEmailIdMap.size());
+        logger.info("customer email and id map from Shopify :: {}", customerEmailIdMap);
+
+//        Map<String, String> customerEmailIdMap = Map.of("vikas.rathod@soulible.com", "gid://shopify/Customer/9335612440916");
+
+        Semaphore semaphore = new Semaphore(10); // Limit concurrency to 10
+        ExecutorService executor = Executors.newFixedThreadPool(10);
+
+        AtomicInteger totalCustomers = new AtomicInteger(0);
+        totalCustomers.addAndGet(customerEmailIdMap.size());
+        AtomicInteger success = new AtomicInteger(0);
+        List<String> failed = Collections.synchronizedList(new ArrayList<>());
+        AtomicLong totalTimeForBothAddresses = new AtomicLong(0);
+
+        for (Map.Entry<String, String> entry : customerEmailIdMap.entrySet()) {
+            String email = entry.getKey();
+            String id = entry.getValue();
+            try {
+                semaphore.acquire();
+                executor.submit(() -> {
+                    try {
+                        Instant customerStart = Instant.now();
+
+                        Instant start1 = Instant.now();
+                        createAddress(id, generateDummyAddress(1));
+                        Instant end1 = Instant.now();
+
+                        Instant start2 = Instant.now();
+                        createAddress(id, generateDummyAddress(2));
+                        Instant end2 = Instant.now();
+
+                        Duration one = Duration.between(start1, end1);
+                        Duration two = Duration.between(start2, end2);
+                        Duration total = Duration.between(customerStart, end2);
+
+                        System.out.printf("Customer %s | Addr1: %dms | Addr2: %dms | Total: %dms\n",
+                                email, one.toMillis(), two.toMillis(), total.toMillis());
+
+                        totalTimeForBothAddresses.addAndGet(total.toMillis());
+                       success.incrementAndGet();
+                    } catch (Exception e) {
+                        logger.error("Error processing customer {}: {}", email, e.getMessage());
+                        failed.add(email);
+                    } finally {
+                        semaphore.release();
+                    }
+                });
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                failed.add(email);
+            }
+        }
+
+        executor.shutdown();
+        try {
+            executor.awaitTermination(30, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        Instant endTime = Instant.now();
+        long totalTimeMs = Duration.between(startTime, endTime).toMillis();
+        long hours = totalTimeMs / 3600000;
+        long minutes = (totalTimeMs % 3600000) / 60000;
+        long seconds = (totalTimeMs % 60000) / 1000;
+
+        int total = totalCustomers.get();
+        long avgPerCustomerMs = total > 0 ? totalTimeForBothAddresses.get() / total : 0;
+        double avgPerCustomerSec = avgPerCustomerMs / 1000.0;
+
+//        System.out.printf("\n--- Summary ---\nTotal customers: %d\nTotal time: %02dh %02dm %02ds (%dms)\nAverage per customer: %.2f seconds (%dms)\n",
+//                total, hours, minutes, seconds, totalTimeMs, avgPerCustomerSec, avgPerCustomerMs);
+
+        logger.info(String.format(
+                """
+                --- Summary ---
+                Total customers: %d
+                Total time: %02dh %02dm %02ds (%dms)
+                Average per customer: %.2f seconds (%dms)
+                Success: %d
+                Failed count: %d
+                Failed: %s
+                """,
+                total, hours, minutes, seconds, totalTimeMs,
+                avgPerCustomerSec, avgPerCustomerMs,
+                success.get(), failed.size(), failed
+        ));
+
+        String end = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+        logger.info("Ended addDummyAddressesAsync... at started: " + start + " | ended: " + end);
+    }
+
+    public Map<String, String> fetchAllCustomersFromShopify() {
+        Map<String, String> allCustomers = new HashMap<>();
+        String cursor = null;
+        boolean hasNextPage = true;
+
+        while (hasNextPage) {
+            try {
+                String query = cursor == null ? """
+                            query {
+                              customers(first: 250) {
+                                edges {
+                                  cursor
+                                  node {
+                                    id
+                                    email
+                                  }
+                                }
+                                pageInfo {
+                                  hasNextPage
+                                }
+                              }
+                            }
+                        """ : String.format("""
+                            query {
+                              customers(first: 250, after: "%s") {
+                                edges {
+                                  cursor
+                                  node {
+                                    id
+                                    email
+                                  }
+                                }
+                                pageInfo {
+                                  hasNextPage
+                                }
+                              }
+                            }
+                        """, cursor);
+
+                String response = sendGraphQLRequest(query, "{}", false);
+                if (response == null) break;
+
+                JsonNode root = objectMapper.readTree(response);
+                JsonNode edges = root.path("data").path("customers").path("edges");
+
+                for (JsonNode edge : edges) {
+                    JsonNode node = edge.path("node");
+                    StringBuilder id = new StringBuilder(node.get("id").asText());
+                    if (!id.toString().startsWith("gid://shopify/Customer/")) {
+                        id.insert(0, "gid://shopify/Customer/");
+                    }
+                    allCustomers.put(node.get("email").asText(), id.toString());
+                    cursor = edge.path("cursor").asText();
+                }
+
+                hasNextPage = root.path("data").path("customers").path("pageInfo").path("hasNextPage").asBoolean();
+            } catch (Exception e) {
+                logger.error("Error paginating customers: {}", e.getMessage());
+                break;
+            }
+        }
+
+        return allCustomers;
+    }
+
+    public void createAddress(String customerId, Map<String, Object> addressInput) {
+        try {
+            String mutation = """
+                    mutation CreateAddress($customerId: ID!, $address: MailingAddressInput!) {
+                      customerAddressCreate(customerId: $customerId, address: $address) {
+                        address { id }
+                        userErrors { field message }
+                      }
+                    }
+                    """;
+
+            Map<String, Object> variables = new HashMap<>();
+            variables.put("customerId", customerId);
+            variables.put("address", addressInput);
+
+            String response = sendGraphQLRequest(mutation, objectMapper.writeValueAsString(variables), null);
+            if (response == null) logger.error("Failed to create address for customer: {}", customerId);
+        } catch (Exception e) {
+            logger.error("Error creating address for customer {}: {}", customerId, e.getMessage());
+        }
+    }
+
+    private static final List<Map<String, Object>> DUMMY_ADDRESSES = List.of(
+            Map.of(
+                    "firstName", "John",
+                    "lastName", "Doe",
+                    "company", "ABC Corp",
+                    "address1", "123 Elm Street",
+                    "address2", "Suite 1A",
+                    "city", "Springfield",
+                    "province", "Illinois",
+                    "country", "United States",
+                    "zip", "62704",
+                    "phone", "+1 217 555 1234"
+            ),
+            Map.of(
+                    "firstName", "Jane",
+                    "lastName", "Smith",
+                    "company", "XYZ Corp",
+                    "address1", "456 Maple Avenue",
+                    "address2", "Floor 2",
+                    "city", "Chicago",
+                    "province", "Illinois",
+                    "country", "United States",
+                    "zip", "60616",
+                    "phone", "+1 312 555 5678"
+            )
+    );
+
+    private static Map<String, Object> generateDummyAddress(int index) {
+        if (index < 1 || index > DUMMY_ADDRESSES.size()) {
+            throw new IllegalArgumentException("Index must be 1 or 2");
+        }
+        return new HashMap<>(DUMMY_ADDRESSES.get(index - 1));
+    }
+
 }

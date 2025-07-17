@@ -86,18 +86,18 @@ public class ProductMigrateController {
 //        return "Imported Product 2 Field ReUpload started successfully";
 //    }
 //
-    @PostMapping("/imported-product-2-fields-re-upload/second-time")
-    public String importedProduct2FieldReUploadSecond() {
-        migrationService.importedProduct2FieldReUploadSecond();
-        return "Imported Product 2 Field second ReUpload started successfully";
-    }
-
-    @PostMapping("/imported-2-lakh-product")
-    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest,
-                                       @RequestBody Set<Long> failedProductIds) {
-        migrationService.imported2LakhProduct(isTest, failedProductIds);
-        return "Imported 2 Lakh Product started successfully";
-    }
+//    @PostMapping("/imported-product-2-fields-re-upload/second-time")
+//    public String importedProduct2FieldReUploadSecond() {
+//        migrationService.importedProduct2FieldReUploadSecond();
+//        return "Imported Product 2 Field second ReUpload started successfully";
+//    }
+//
+//    @PostMapping("/imported-2-lakh-product")
+//    public String imported2LakhProduct(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+//                                       @RequestBody Set<Long> failedProductIds) {
+//        migrationService.imported2LakhProduct(isTest, failedProductIds);
+//        return "Imported 2 Lakh Product started successfully";
+//    }
 //
 //    @PostMapping("base-product-update-all-fields")
 //    public String minPriceUpdateBaseProduct() {
@@ -111,12 +111,12 @@ public class ProductMigrateController {
 //        return "Min Price Update Stock Product started successfully";
 //    }
 
-    @PostMapping("/imported-all-3-script-in-1-call")
-    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
-                                            @RequestBody ProductImport3In1Request payload){
-        migrationService.importedAll3ScriptIn1Call(isTest, payload.getSearchFailedProductIds(), payload.getCaratFailedProductIds(), payload.getBestsellerFailedProductIds());
-        return "importedAll3ScriptIn1Call started successfully";
-    }
+//    @PostMapping("/imported-all-3-script-in-1-call")
+//    public String importedAll3ScriptIn1Call(@RequestParam(required = false, defaultValue = "true") boolean isTest,
+//                                            @RequestBody ProductImport3In1Request payload){
+//        migrationService.importedAll3ScriptIn1Call(isTest, payload.getSearchFailedProductIds(), payload.getCaratFailedProductIds(), payload.getBestsellerFailedProductIds());
+//        return "importedAll3ScriptIn1Call started successfully";
+//    }
 
     @GetMapping("/import/summary")
     public ResponseEntity<String> getImportSummaries() {
@@ -129,5 +129,11 @@ public class ProductMigrateController {
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_PLAIN)
                 .body(fullSummary);
+    }
+
+    @PostMapping("/customer/add-dummy-addresses")
+    public String triggerDummyAddressAddition() {
+        migrationService.addDummyAddressesAsync();
+        return "Address creation started in background.";
     }
 }
