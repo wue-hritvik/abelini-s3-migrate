@@ -53,8 +53,8 @@ public class ShopifyService {
     @Value("${shopify_access_token_2}")
     private String accessToken;
 
-    private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2025-01/graphql.json";
-    private final String SHOPIFY_ACCESS_TOKEN = accessToken;
+//    private final String SHOPIFY_GRAPHQL_URL = shopifyStore + "/admin/api/2025-01/graphql.json";
+//    private final String SHOPIFY_ACCESS_TOKEN = accessToken;
 
     private List<String> readCSV(String filePath) throws IOException, CsvException {
         try (CSVReader reader = new CSVReader(new FileReader(filePath))) {
@@ -994,14 +994,14 @@ public class ShopifyService {
             HttpEntity<String> entity = new HttpEntity<>(requestBody.toString(), headers);
 
             logger.info("Sending Shopify GraphQL request:");
-            logger.info("URL: " + shopifyStore + SHOPIFY_GRAPHQL_URL);
+            logger.info("URL: " + shopifyStore + "/admin/api/2025-01/graphql.json");
             logger.info("Headers: " + headers.entrySet().stream()
                     .map(e -> e.getKey() + ": " + (e.getKey().equals("X-Shopify-Access-Token") ? "****" : e.getValue()))
                     .collect(Collectors.joining(", ")));
             logger.info("Request Body: " + requestBody.toString(2));  // Pretty-print JSON
 
             ResponseEntity<String> responseEntity = restTemplate.exchange(
-                    shopifyStore + SHOPIFY_GRAPHQL_URL,
+                    shopifyStore + "/admin/api/2025-01/graphql.json",
                     HttpMethod.POST,
                     entity,
                     String.class
