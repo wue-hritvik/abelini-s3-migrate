@@ -13,9 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.io.File;
-import java.util.Objects;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 @RestController
 @RequestMapping("/shopify")
@@ -66,15 +64,15 @@ public class ShopifyController {
 ////        }
 ////    }
 //
-//    @PostMapping("/2/generate-csv")
-//    public String generateCsv(@RequestParam(required = false) String fileName,
-//                              @RequestParam(defaultValue = "false") boolean onlySupportedFile,
-//                              @RequestParam(defaultValue = "abelini-images", required = false) String bucketName) {
-//        String name;
-//        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), UUID.randomUUID().toString());
-//        s3Service.exportS3ImagesToCSV(name, onlySupportedFile, bucketName);
-//        return "CSV file generation started! and fileName will be: " + name + ".csv";
-//    }
+    @PostMapping("/2/generate-csv")
+    public String generateCsv(@RequestParam(required = false) String fileName,
+                              @RequestParam(defaultValue = "false") boolean onlySupportedFile,
+                              @RequestParam(defaultValue = "abelini-images", required = false) String bucketName) {
+        String name;
+        name = Objects.requireNonNullElse(fileName.replace(".csv", ""), UUID.randomUUID().toString());
+        s3Service.exportS3ImagesToCSV(name, onlySupportedFile, bucketName);
+        return "CSV file generation started! and fileName will be: " + name + ".csv";
+    }
 
 //    @GetMapping("/1/rename-files")
 //    public String renameFiles() {
@@ -127,5 +125,17 @@ public class ShopifyController {
 //        shopifyFileFetcherService.compareFileNames();
 //        return "compare file names started";
 //    }
+
+    @PostMapping("/update/images/by/sku")
+    public String updateImagesBySku(@RequestParam String csvPath,
+            @RequestBody List<String> skus) {
+        shopifyService.updateImagesBySku(skus, csvPath);
+        return "update images by sku started";
+    }
+
+    @GetMapping("/update/image-job/sku/summary")
+    public Map<String, Object> getImageJobSummarySku() {
+           return shopifyService.getImageJobSummarySku();
+    }
 
 }

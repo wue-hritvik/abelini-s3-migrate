@@ -136,4 +136,10 @@ public class ProductMigrateController {
         migrationService.addDummyAddressesAsync();
         return "Address creation started in background.";
     }
+
+    @PostMapping("/customer/add-dummy-orders")
+    public String triggerDummyOrderAddition() {
+        migrationService.addDummyOrderAsync();
+        return "Order creation started in background.";
+    }
 }
