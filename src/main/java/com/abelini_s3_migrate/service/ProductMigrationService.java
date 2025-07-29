@@ -2,6 +2,7 @@ package com.abelini_s3_migrate.service;
 
 
 import com.abelini_s3_migrate.entity.*;
+import com.abelini_s3_migrate.extra.Address;
 import com.abelini_s3_migrate.extra.ProductEntry;
 import com.abelini_s3_migrate.repo.*;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -12,6 +13,7 @@ import com.google.gson.Gson;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvException;
 import jakarta.annotation.PostConstruct;
+import lombok.Getter;
 import org.apache.commons.lang3.StringUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -3184,63 +3186,99 @@ public class ProductMigrationService {
         throw new RuntimeException("ERP health check failed after max retries");
     }
 
+    AtomicInteger totalCustomersA = new AtomicInteger();
+    AtomicInteger totalCustomersWithAddressA = new AtomicInteger();
+    AtomicInteger totalAddressesAttemptedA = new AtomicInteger();
+    AtomicInteger successCountA = new AtomicInteger();
+    Map<String, List<String>> failedMapA = new ConcurrentHashMap<>();
+
+    public Map<String, Object> getResultAddressCreate() {
+        return Map.of(
+                "totalCustomers", totalCustomersA.get(),
+                "totalCustomersWithAddress", totalCustomersWithAddressA.get(),
+                "totalAddressesAttempted", totalAddressesAttemptedA.get(),
+                "totalSuccess", successCountA.get(),
+                "failedCount", failedMapA.size(),
+                "failed", failedMapA
+        );
+    }
+
     @Async
     public void addDummyAddressesAsync() {
-        String start = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
-        logger.info("Starting addDummyAddressesAsync... at " + start);
-        Instant startTime = Instant.now();
+        String start = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+        logger.info("Starting real address creation at {}", start);
 
         Map<String, String> customerEmailIdMap = fetchAllCustomersFromShopify();
-//        Map<String, String> customerEmailIdMap = Map.of("vikas.rathod@soulible.com", "gid://shopify/Customer/9335612440916");
+//        Map<String, String> customerEmailIdMap = Map.of(
+//                "vikas.rathod@soulible.com", "gid://shopify/Customer/9335612440916",
+//                "marketing1@abelini.com", "gid://shopify/Customer/9606891241812",
+//                "marketing2@abelini.com", "gid://shopify/Customer/9606891274580",
+//                "marketing3@abelini.com", "gid://shopify/Customer/9606891307348",
+//                "marketing4@abelini.com", "gid://shopify/Customer/9606891340116"
+//        );
+        if (customerEmailIdMap.isEmpty()) {
+            logger.error("Failed to fetch customers from Shopify");
+            return;
+        }
+        totalCustomersA.addAndGet(customerEmailIdMap.size());
 
-        logger.info("Fetched {} customers from Shopify", customerEmailIdMap.size());
-        logger.info("customer email and id map from Shopify :: {}", customerEmailIdMap);
+        String allAddressesJson = callExternalAddressService();
+        if (allAddressesJson == null) {
+            logger.error("Failed to fetch address from external service");
+            return;
+        }
 
-        Semaphore semaphore = new Semaphore(10); // Limit concurrency to 10
+        Map<String, List<Address>> emailToAddresses;
+        try {
+            emailToAddresses = objectMapper.readValue(allAddressesJson, new TypeReference<>() {
+            });
+        } catch (Exception e) {
+            logger.error("Failed to deserialize address response: {}", e.getMessage(), e);
+            return;
+        }
+
+        totalCustomersWithAddressA.addAndGet(emailToAddresses.size());
+
         ExecutorService executor = Executors.newFixedThreadPool(10);
-
-        AtomicInteger totalCustomers = new AtomicInteger(0);
-        totalCustomers.addAndGet(customerEmailIdMap.size());
-        AtomicInteger success = new AtomicInteger(0);
-        List<String> failed = Collections.synchronizedList(new ArrayList<>());
-        AtomicLong totalTimeForBothAddresses = new AtomicLong(0);
+        Semaphore semaphore = new Semaphore(10);
 
         for (Map.Entry<String, String> entry : customerEmailIdMap.entrySet()) {
             String email = entry.getKey();
-            String id = entry.getValue();
+            String customerId = entry.getValue();
+
+            List<Address> addresses = emailToAddresses.get(email);
+            if (addresses == null || addresses.isEmpty()) {
+                failedMapA.put(email, List.of("No address found for email"));
+                continue;
+            }
+
             try {
                 semaphore.acquire();
                 executor.submit(() -> {
                     try {
-                        Instant customerStart = Instant.now();
+                        for (int i = 0; i < addresses.size(); i++) {
+                            Address addr = addresses.get(i);
+                            try {
+                                createAddress(customerId, addr);
+                                successCountA.incrementAndGet();
+                            } catch (Exception ex) {
+                                failedMapA.computeIfAbsent(email, k -> Collections.synchronizedList(new ArrayList<>()))
+                                        .add("Index " + i + ": " + ex.getMessage());
+                            } finally {
+                                totalAddressesAttemptedA.incrementAndGet();
+                            }
+                        }
 
-                        Instant start1 = Instant.now();
-                        createAddress(id, generateDummyAddress(1));
-                        Instant end1 = Instant.now();
-
-                        Instant start2 = Instant.now();
-                        createAddress(id, generateDummyAddress(2));
-                        Instant end2 = Instant.now();
-
-                        Duration one = Duration.between(start1, end1);
-                        Duration two = Duration.between(start2, end2);
-                        Duration total = Duration.between(customerStart, end2);
-
-                        System.out.printf("Customer %s | Addr1: %dms | Addr2: %dms | Total: %dms\n",
-                                email, one.toMillis(), two.toMillis(), total.toMillis());
-
-                        totalTimeForBothAddresses.addAndGet(total.toMillis());
-                        success.incrementAndGet();
                     } catch (Exception e) {
-                        logger.error("Error processing customer {}: {}", email, e.getMessage());
-                        failed.add(email);
+                        failedMapA.put(email, List.of("Processing error: " + e.getMessage()));
                     } finally {
                         semaphore.release();
                     }
                 });
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                failed.add(email);
+                failedMapA.put(email, List.of("Thread interrupted"));
             }
         }
 
@@ -3251,37 +3289,37 @@ public class ProductMigrationService {
             Thread.currentThread().interrupt();
         }
 
-        Instant endTime = Instant.now();
-        long totalTimeMs = Duration.between(startTime, endTime).toMillis();
-        long hours = totalTimeMs / 3600000;
-        long minutes = (totalTimeMs % 3600000) / 60000;
-        long seconds = (totalTimeMs % 60000) / 1000;
-
-        int total = totalCustomers.get();
-        long avgPerCustomerMs = total > 0 ? totalTimeForBothAddresses.get() / total : 0;
-        double avgPerCustomerSec = avgPerCustomerMs / 1000.0;
-
-//        System.out.printf("\n--- Summary ---\nTotal customers: %d\nTotal time: %02dh %02dm %02ds (%dms)\nAverage per customer: %.2f seconds (%dms)\n",
-//                total, hours, minutes, seconds, totalTimeMs, avgPerCustomerSec, avgPerCustomerMs);
-
-        logger.info(String.format(
-                """
-                        --- Summary ---
-                        Total customers: %d
-                        Total time: %02dh %02dm %02ds (%dms)
-                        Average per customer: %.2f seconds (%dms)
-                        Success: %d
-                        Failed count: %d
-                        Failed: %s
-                        """,
-                total, hours, minutes, seconds, totalTimeMs,
-                avgPerCustomerSec, avgPerCustomerMs,
-                success.get(), failed.size(), failed
-        ));
-
-        String end = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
-        logger.info("Ended addDummyAddressesAsync... at started: " + start + " | ended: " + end);
+        logger.info("Address add summary: {}", getResultAddressCreate());
+        String end = ZonedDateTime.now(ZoneId.of("Asia/Kolkata"))
+                .format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
+        logger.info("Ended real address creation at {}", end);
     }
+
+    private String callExternalAddressService() {
+        String url = "https://www.abelini.com/shopify/api/customer_address.php";
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Content-Type", "application/json");
+//        headers.set("Authorization", jwtToken);
+
+        HttpEntity<?> entity = new HttpEntity<>(headers);
+        //logger.info("api entity :: {}", entity);
+        try {
+            String response = restTemplate.postForObject(url, entity, String.class);
+            //logger.info("api response :: {}", response);
+
+            if (StringUtils.isNotBlank(response)) {
+                return response;
+            } else {
+                logger.error("API returned an empty address response");
+                return null;
+            }
+        } catch (Exception e) {
+            System.out.println("Failed to called address api " + e.getMessage());
+            return null;
+        }
+    }
+
 
     public Map<String, String> fetchAllCustomersFromShopify() {
         Map<String, String> allCustomers = new HashMap<>();
@@ -3350,11 +3388,24 @@ public class ProductMigrationService {
         return allCustomers;
     }
 
-    public void createAddress(String customerId, Map<String, Object> addressInput) {
+    public void createAddress(String customerId, Address address) {
         try {
+
+            Map<String, Object> addressInput = new HashMap<>();
+            addressInput.put("firstName", address.getFirstName());
+            addressInput.put("lastName", address.getLastName());
+            addressInput.put("company", address.getCompany());
+            addressInput.put("address1", address.getAddress1());
+            addressInput.put("address2", address.getAddress2());
+            addressInput.put("city", address.getCity());
+            addressInput.put("province", address.getProvince());
+            addressInput.put("country", address.getCountry());
+            addressInput.put("zip", address.getZip());
+            addressInput.put("phone", address.getPhone());
+
             String mutation = """
-                    mutation CreateAddress($customerId: ID!, $address: MailingAddressInput!) {
-                      customerAddressCreate(customerId: $customerId, address: $address) {
+                    mutation CreateAddress($customerId: ID!, $address: MailingAddressInput!, $setAsDefault: Boolean!) {
+                      customerAddressCreate(customerId: $customerId, address: $address, setAsDefault: $setAsDefault) {
                         address { id }
                         userErrors { field message }
                       }
@@ -3364,58 +3415,96 @@ public class ProductMigrationService {
             Map<String, Object> variables = new HashMap<>();
             variables.put("customerId", customerId);
             variables.put("address", addressInput);
+            variables.put("setAsDefault", address.isDefault());
 
             regulateApiRate();
             remainingPoints.addAndGet(-API_COST_PER_CALL);
             String response = sendGraphQLRequest(mutation, objectMapper.writeValueAsString(variables), null);
-            if (response == null) logger.error("Failed to create address for customer: {}", customerId);
+            if (response == null) {
+                throw new RuntimeException("Null response from Shopify");
+            }
+
+            // Optional: check for userErrors in response JSON
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode errors = root.path("data").path("customerAddressCreate").path("userErrors");
+            if (errors.isArray() && !errors.isEmpty()) {
+                throw new RuntimeException(errors.get(0).path("message").asText());
+            }
+
         } catch (Exception e) {
             logger.error("Error creating address for customer {}: {}", customerId, e.getMessage());
+            throw new RuntimeException("Error creating address: " + e.getMessage(), e);
         }
     }
 
-    private static final List<Map<String, Object>> DUMMY_ADDRESSES = List.of(
-            Map.of(
-                    "firstName", "John",
-                    "lastName", "Doe",
-                    "company", "ABC Corp",
-                    "address1", "123 Elm Street",
-                    "address2", "Suite 1A",
-                    "city", "Springfield",
-                    "province", "Illinois",
-                    "country", "United States",
-                    "zip", "62704",
-                    "phone", "+1 217 555 1234"
-            ),
-            Map.of(
-                    "firstName", "Jane",
-                    "lastName", "Smith",
-                    "company", "XYZ Corp",
-                    "address1", "456 Maple Avenue",
-                    "address2", "Floor 2",
-                    "city", "Chicago",
-                    "province", "Illinois",
-                    "country", "United States",
-                    "zip", "60616",
-                    "phone", "+1 312 555 5678"
-            )
-    );
+//    private static final List<Map<String, Object>> DUMMY_ADDRESSES = List.of(
+//            Map.of(
+//                    "firstName", "John",
+//                    "lastName", "Doe",
+//                    "company", "ABC Corp",
+//                    "address1", "123 Elm Street",
+//                    "address2", "Suite 1A",
+//                    "city", "Springfield",
+//                    "province", "Illinois",
+//                    "country", "United States",
+//                    "zip", "62704",
+//                    "phone", "+1 217 555 1234"
+//            ),
+//            Map.of(
+//                    "firstName", "Jane",
+//                    "lastName", "Smith",
+//                    "company", "XYZ Corp",
+//                    "address1", "456 Maple Avenue",
+//                    "address2", "Floor 2",
+//                    "city", "Chicago",
+//                    "province", "Illinois",
+//                    "country", "United States",
+//                    "zip", "60616",
+//                    "phone", "+1 312 555 5678"
+//            )
+//    );
+//
+//    private static Map<String, Object> generateDummyAddress(int index) {
+//        if (index < 1 || index > DUMMY_ADDRESSES.size()) {
+//            throw new IllegalArgumentException("Index must be 1 or 2");
+//        }
+//        return new HashMap<>(DUMMY_ADDRESSES.get(index - 1));
+//    }
 
-    private static Map<String, Object> generateDummyAddress(int index) {
-        if (index < 1 || index > DUMMY_ADDRESSES.size()) {
-            throw new IllegalArgumentException("Index must be 1 or 2");
-        }
-        return new HashMap<>(DUMMY_ADDRESSES.get(index - 1));
+    AtomicInteger totalCustomersO = new AtomicInteger();
+    AtomicInteger totalOrdersAttemptedO = new AtomicInteger();
+    AtomicInteger successCountO = new AtomicInteger();
+    Map<String, List<String>> failedMapO = new ConcurrentHashMap<>();
+
+    public Map<String, Object> getResultOrderCreate() {
+        return Map.of(
+                "totalCustomers", totalCustomersO.get(),
+                "totalOrderAttempted", totalOrdersAttemptedO.get(),
+                "totalSuccess", successCountO.get(),
+                "failedCount", failedMapO.size(),
+                "failed", failedMapO
+        );
     }
 
     @Async
     public void addDummyOrderAsync() {
         String start = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
-        logger.info("Starting addDummyOrderAsync... at " + start);
-        Instant startTime = Instant.now();
+        logger.info("Starting addOrderAsync... at " + start);
 
-//        Map<String, String> customerEmailIdMap = fetchAllCustomersFromShopify();
-        Map<String, String> customerEmailIdMap = Map.of("vikas.rathod@soulible.com", "gid://shopify/Customer/9335612440916");
+        Map<String, String> customerEmailIdMap = fetchAllCustomersFromShopify();
+//        Map<String, String> customerEmailIdMap = Map.of(
+//                "vikas.rathod@soulible.com", "gid://shopify/Customer/9335612440916",
+//                "marketing1@abelini.com", "gid://shopify/Customer/9606891241812",
+//                "marketing2@abelini.com", "gid://shopify/Customer/9606891274580",
+//                "marketing3@abelini.com", "gid://shopify/Customer/9606891307348",
+//                "marketing4@abelini.com", "gid://shopify/Customer/9606891340116"
+//        );
+
+        if (customerEmailIdMap.isEmpty()) {
+            logger.error("Failed to fetch customers from Shopify");
+            return;
+        }
+        totalCustomersO.addAndGet(customerEmailIdMap.size());
 
         logger.info("Fetched {} customers from Shopify", customerEmailIdMap.size());
         logger.info("customer email and id map from Shopify :: {}", customerEmailIdMap);
@@ -3423,39 +3512,46 @@ public class ProductMigrationService {
         Semaphore semaphore = new Semaphore(10); // Limit concurrency to 10
         ExecutorService executor = Executors.newFixedThreadPool(10);
 
-        AtomicInteger totalCustomers = new AtomicInteger(0);
-        totalCustomers.addAndGet(customerEmailIdMap.size());
-        AtomicInteger success = new AtomicInteger(0);
-        List<String> failed = Collections.synchronizedList(new ArrayList<>());
-        AtomicLong totalTimeForBothAddresses = new AtomicLong(0);
+        totalCustomersO.addAndGet(customerEmailIdMap.size());
 
         for (Map.Entry<String, String> entry : customerEmailIdMap.entrySet()) {
             String email = entry.getKey();
-            String id = entry.getValue();
+            String customerId = entry.getValue();
+
             try {
                 semaphore.acquire();
                 executor.submit(() -> {
                     try {
-                        Instant customerStart = Instant.now();
-                        boolean created = createDummyOrderForCustomer(id, email);
-                        Instant end1 = Instant.now();
-                        Duration total = Duration.between(customerStart, end1);
-                        totalTimeForBothAddresses.addAndGet(total.toMillis());
-                        if (created) {
-                            success.incrementAndGet();
-                        } else {
-                            failed.add(email);
+                        JSONArray orders = callExternalOrderService(email);
+                        if (orders == null || orders.isEmpty()) {
+                            return;
                         }
+
+                        for (int i = 0; i < orders.length(); i++) {
+                            JSONObject orderJson = orders.getJSONObject(i);
+                            try {
+                                boolean created = createOrderForCustomer(customerId, email, orderJson);
+                                if (created) successCountO.incrementAndGet();
+                                else
+                                    failedMapO.computeIfAbsent(email, k -> Collections.synchronizedList(new ArrayList<>()))
+                                            .add("Index " + i + ": Failed to create order");
+                            } catch (Exception ex) {
+                                failedMapO.computeIfAbsent(email, k -> Collections.synchronizedList(new ArrayList<>()))
+                                        .add("Index " + i + ": " + ex.getMessage());
+                            } finally {
+                                totalOrdersAttemptedO.incrementAndGet();
+                            }
+                        }
+
                     } catch (Exception e) {
-                        logger.error("Error processing customer {}: {}", email, e.getMessage());
-                        failed.add(email);
+                        failedMapO.put(email, List.of("Fetch or processing error: " + e.getMessage()));
                     } finally {
                         semaphore.release();
                     }
                 });
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                failed.add(email);
+                failedMapO.put(email, List.of("Thread interrupted"));
             }
         }
 
@@ -3466,39 +3562,45 @@ public class ProductMigrationService {
             Thread.currentThread().interrupt();
         }
 
-        Instant endTime = Instant.now();
-        long totalTimeMs = Duration.between(startTime, endTime).toMillis();
-        long hours = totalTimeMs / 3600000;
-        long minutes = (totalTimeMs % 3600000) / 60000;
-        long seconds = (totalTimeMs % 60000) / 1000;
-
-        int total = totalCustomers.get();
-        long avgPerCustomerMs = total > 0 ? totalTimeForBothAddresses.get() / total : 0;
-        double avgPerCustomerSec = avgPerCustomerMs / 1000.0;
-
-//        System.out.printf("\n--- Summary ---\nTotal customers: %d\nTotal time: %02dh %02dm %02ds (%dms)\nAverage per customer: %.2f seconds (%dms)\n",
-//                total, hours, minutes, seconds, totalTimeMs, avgPerCustomerSec, avgPerCustomerMs);
-
-        logger.info(String.format(
-                """
-                        --- Summary ---
-                        Total customers: %d
-                        Total time: %02dh %02dm %02ds (%dms)
-                        Average per customer: %.2f seconds (%dms)
-                        Success: %d
-                        Failed count: %d
-                        Failed: %s
-                        """,
-                total, hours, minutes, seconds, totalTimeMs,
-                avgPerCustomerSec, avgPerCustomerMs,
-                success.get(), failed.size(), failed
-        ));
-
+        logger.info("print summary: {}", getResultOrderCreate());
         String end = ZonedDateTime.now(ZoneId.of("Asia/Kolkata")).format(DateTimeFormatter.ofPattern("dd MM yyyy hh:mm:ss a z"));
-        logger.info("Ended addDummyOrderAsync... at started: " + start + " | ended: " + end);
+        logger.info("Ended addOrderAsync... at started: " + start + " | ended: " + end);
     }
 
-    private boolean createDummyOrderForCustomer(String customerId, String email) {
+    private JSONArray callExternalOrderService(String email) {
+        String url = "https://www.abelini.com/shopify/api/order_datas.php";
+
+        Map<String, String> request = new HashMap<>();
+        request.put("email", email);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Content-Type", "application/json");
+//        headers.set("Authorization", jwtToken);
+
+        HttpEntity<?> entity = new HttpEntity<>(request, headers);
+
+        try {
+            ResponseEntity<String> response = restTemplate.exchange(url, HttpMethod.POST, entity, String.class);
+
+            if (response.getStatusCode().is2xxSuccessful()) {
+                String body = response.getBody();
+
+                if (StringUtils.isNotBlank(body)) {
+                    return new JSONArray(body);
+                } else {
+                    logger.error("Order API returned an empty response for email {}", email);
+                    return null;
+                }
+            } else {
+                throw new RuntimeException("Non-2xx response from Order API for email " + email + ": " + response.getStatusCode());
+            }
+        } catch (Exception e) {
+            logger.error("Failed to call external order API for email {}: {}", email, e.getMessage(), e);
+            throw new RuntimeException("Failed to call external order API: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean createOrderForCustomer(String customerId, String email, JSONObject orderJson) {
         String mutation = """
                     mutation orderCreate($order: OrderCreateOrderInput!) {
                       orderCreate(order: $order) {
@@ -3516,125 +3618,114 @@ public class ProductMigrationService {
 
         try {
             Map<String, Object> orderInput = new HashMap<>();
-            orderInput.put("test", true); // Test order
-            orderInput.put("currency", "GBP");
-            orderInput.put("processedAt", "2024-01-01T12:00:00Z");
+//            orderInput.put("test", true); // Test order
+            orderInput.put("currency", orderJson.optString("currency"));
+            orderInput.put("processedAt", orderJson.optString("processedAt"));
 //            orderInput.put("sourceName", "migration-script");
 
-            // Dummy address
-            Map<String, Object> address = Map.of(
-                    "firstName", "John",
-                    "lastName", "Doe",
-                    "address1", "123 Test Street",
-                    "city", "London",
-                    "province", "London",
-                    "country", "United Kingdom",
-                    "zip", "W1A 1AA"
-            );
-            orderInput.put("shippingAddress", address);
+//            Map<String, Object> address = Map.of(
+//                    "firstName", "John",
+//                    "lastName", "Doe",
+//                    "address1", "123 Test Street",
+//                    "city", "London",
+//                    "province", "London",
+//                    "country", "United Kingdom",
+//                    "zip", "W1A 1AA"
+//            );
+            orderInput.put("shippingAddress", orderJson.getJSONObject("shippingAddress"));
 //            orderInput.put("billingAddress", address);
 
-            // Main line item with product id, price, quantity
-            Map<String, Object> lineItem = new HashMap<>();
-//            lineItem.put("productId", "gid://shopify/Product/11884994330964");
-            lineItem.put("variantId", "gid://shopify/ProductVariant/51486211637588");
-            lineItem.put("sku", "RINE3128");
-            lineItem.put("quantity", 1);
-            lineItem.put("priceSet", Map.of(
-                    "shopMoney", Map.of("amount", 430, "currencyCode", "GBP")
-                    , "presentmentMoney", Map.of("amount", 430, "currencyCode", "GBP") //
-            ));
-//            orderInput.put("discountCode", Map.of(
-//                    "code", "IMPORT12",
-//                    "amount", "12.00",
-//                    "type", "PERCENTAGE"  // Or use "PERCENTAGE"
+            JSONArray lineItemsArray = orderJson.optJSONArray("lineItems");
+            List<Map<String, Object>> lineItems = new ArrayList<>();
+            if (lineItemsArray != null) {
+                for (int i = 0; i < lineItemsArray.length(); i++) {
+                    JSONObject line = lineItemsArray.getJSONObject(i);
+                    Map<String, Object> lineItem = new HashMap<>();
+
+                    lineItem.put("variantId", getVarientIdByProductId(line.getString("productId")));
+                    lineItem.put("sku", line.getString("sku"));
+                    lineItem.put("quantity", line.getInt("quantity"));
+                    lineItem.put("priceSet", Map.of(
+                            "shopMoney", Map.of("amount", line.getBigDecimal("priceSet"), "currencyCode", "GBP"),
+                            "presentmentMoney", Map.of("amount", line.getBigDecimal("priceSet"), "currencyCode", "GBP")
+                    ));
+
+                    JSONArray propsArray = line.optJSONArray("properties");
+                    if (propsArray != null) {
+                        List<Map<String, String>> props = new ArrayList<>();
+                        for (int j = 0; j < propsArray.length(); j++) {
+                            JSONObject prop = propsArray.getJSONObject(j);
+                            props.add(Map.of("name", prop.getString("name"), "value", prop.optString("value", "")));
+                        }
+                        lineItem.put("properties", props);
+                    }
+
+                    lineItems.add(lineItem);
+                }
+            }
+
+//            // Main line item with product id, price, quantity
+//            Map<String, Object> lineItem = new HashMap<>();
+////            lineItem.put("productId", "gid://shopify/Product/11884994330964");
+//            lineItem.put("variantId", "gid://shopify/ProductVariant/51486211637588");
+//            lineItem.put("sku", "RINE3128");
+//            lineItem.put("quantity", 1);
+//            lineItem.put("priceSet", Map.of(
+//                    "shopMoney", Map.of("amount", 430, "currencyCode", "GBP")
+//                    , "presentmentMoney", Map.of("amount", 430, "currencyCode", "GBP") //
 //            ));
+//            // All your "custom attributes" are actually line item properties:
+//            List<Map<String, Object>> lineItemProperties = new ArrayList<>();
+//            lineItemProperties.add(Map.of("name", "SKU", "value", "RINE3128"));
+//            lineItemProperties.add(Map.of("name", "_Product Image", "value", "https://example.com/image1.jpg"));
+//            lineItemProperties.add(Map.of("name", "_Product URL", "value", "https://example.com/product-url"));
+//            lineItemProperties.add(Map.of("name", "_Delivery Date", "value", "2025-07-30"));
+//            lineItemProperties.add(Map.of("name", "_delivery_param", "value",
+//                    "{\"product_id\":\"1221\",\"sku\":\"RINE3128\",\"delivery_days\":\"8\",\"certificate_no\":\"\",\"options\":{\"stone_type\":\"DI\",\"shape\":\"RND\",\"carat\":\"20\",\"clarity\":\"I1\",\"color\":\"I\",\"certificate\":\"ABELINI\",\"metal\":\"GL_9K_W\"}}"));
+//            lineItemProperties.add(Map.of("name", "_price_param", "value",
+//                    "{\"option_value_ids\":\"172,195,30,81,94,59,116\",\"engraving_charges\":0,\"instock\":\"\",\"tag_no\":\"\",\"metal_weight\":\"0\",\"category_id\":\"1\",\"quantity\":1,\"product_id\":\"1221\",\"certificate_no\":\"\",\"carat_weight\":0,\"metal_price\":0,\"stone_price\":0,\"markup\":\"25\",\"discount\":\"12\",\"model\":\"RINE3128\",\"option\":{\"11705\":\"286563\",\"11706\":\"72880\",\"11707\":\"72890\",\"11708\":\"72896\",\"11709\":\"72897\",\"11710\":\"72909\",\"11711\":\"72916\",\"11712\":\"72917\",\"29671\":\"179188\"}}"));
+//
+//            lineItemProperties.add(Map.of("name", "_SKU Full", "value", "RINE3128_W"));
+//            lineItemProperties.add(Map.of("name", "Metal", "value", "9K White Gold"));
+//            lineItemProperties.add(Map.of("name", "Ring Size", "value", "M"));
+//            lineItemProperties.add(Map.of("name", "Stone Type", "value", "Naturally Mined Diamond"));
+//            lineItemProperties.add(Map.of("name", "Shape", "value", "Round"));
+//            lineItemProperties.add(Map.of("name", "Carat", "value", "0.20"));
+//            lineItemProperties.add(Map.of("name", "Clarity", "value", "I1"));
+//            lineItemProperties.add(Map.of("name", "Colour", "value", "I"));
+//            lineItemProperties.add(Map.of("name", "Cut", "value", "Good"));
+//            lineItemProperties.add(Map.of("name", "Certificate", "value", "ABELINI"));
+//            lineItemProperties.add(Map.of("name", "_SKU Hash", "value", "3ED555555"));
+//            lineItemProperties.add(Map.of("name", "_category_name", "value", "engagement rings"));
+//            lineItemProperties.add(Map.of("name", "_style_name", "value", "classic solitaire"));
+//            lineItemProperties.add(Map.of("name", "_Product Title", "value", "Round 9k White Gold Naturally Mined Diamond Cross Over Claws Gallary Side Stone Engagement Rings"));
+//            lineItemProperties.add(Map.of("name", "_unique_id", "value", "jHnyuaIAMq"));
+//            lineItem.put("properties", lineItemProperties);
 
-            // All your "custom attributes" are actually line item properties:
-            List<Map<String, Object>> lineItemProperties = new ArrayList<>();
-            lineItemProperties.add(Map.of("name", "SKU", "value", "RINE3128"));
-            lineItemProperties.add(Map.of("name", "_Product Image", "value", "https://example.com/image1.jpg"));
-            lineItemProperties.add(Map.of("name", "_Product URL", "value", "https://example.com/product-url"));
-            lineItemProperties.add(Map.of("name", "_Delivery Date", "value", "2025-07-30"));
-            lineItemProperties.add(Map.of("name", "_delivery_param", "value",
-                    "{\"product_id\":\"1221\",\"sku\":\"RINE3128\",\"delivery_days\":\"8\",\"certificate_no\":\"\",\"options\":{\"stone_type\":\"DI\",\"shape\":\"RND\",\"carat\":\"20\",\"clarity\":\"I1\",\"color\":\"I\",\"certificate\":\"ABELINI\",\"metal\":\"GL_9K_W\"}}"));
-            lineItemProperties.add(Map.of("name", "_price_param", "value",
-                    "{\"option_value_ids\":\"172,195,30,81,94,59,116\",\"engraving_charges\":0,\"instock\":\"\",\"tag_no\":\"\",\"metal_weight\":\"0\",\"category_id\":\"1\",\"quantity\":1,\"product_id\":\"1221\",\"certificate_no\":\"\",\"carat_weight\":0,\"metal_price\":0,\"stone_price\":0,\"markup\":\"25\",\"discount\":\"12\",\"model\":\"RINE3128\",\"option\":{\"11705\":\"286563\",\"11706\":\"72880\",\"11707\":\"72890\",\"11708\":\"72896\",\"11709\":\"72897\",\"11710\":\"72909\",\"11711\":\"72916\",\"11712\":\"72917\",\"29671\":\"179188\"}}"));
+            orderInput.put("lineItems", lineItems);
 
-            lineItemProperties.add(Map.of("name", "_SKU Full", "value", "RINE3128_W"));
-            lineItemProperties.add(Map.of("name", "Metal", "value", "9K White Gold"));
-            lineItemProperties.add(Map.of("name", "Ring Size", "value", "M"));
-            lineItemProperties.add(Map.of("name", "Stone Type", "value", "Naturally Mined Diamond"));
-            lineItemProperties.add(Map.of("name", "Shape", "value", "Round"));
-            lineItemProperties.add(Map.of("name", "Carat", "value", "0.20"));
-            lineItemProperties.add(Map.of("name", "Clarity", "value", "I1"));
-            lineItemProperties.add(Map.of("name", "Colour", "value", "I"));
-            lineItemProperties.add(Map.of("name", "Cut", "value", "Good"));
-            lineItemProperties.add(Map.of("name", "Certificate", "value", "ABELINI"));
-            lineItemProperties.add(Map.of("name", "_SKU Hash", "value", "3ED555555"));
-            lineItemProperties.add(Map.of("name", "_category_name", "value", "engagement rings"));
-            lineItemProperties.add(Map.of("name", "_style_name", "value", "classic solitaire"));
-            lineItemProperties.add(Map.of("name", "_Product Title", "value", "Round 9k White Gold Naturally Mined Diamond Cross Over Claws Gallary Side Stone Engagement Rings"));
-            lineItemProperties.add(Map.of("name", "_unique_id", "value", "jHnyuaIAMq"));
-            lineItem.put("properties", lineItemProperties);
-
-            Map<String, Object> lineItem2 = new HashMap<>();
-            lineItem2.put("variantId", "gid://shopify/ProductVariant/51486211637588");
-            lineItem2.put("sku", "RINE3129");
-            lineItem2.put("quantity", 1);
-            lineItem2.put("priceSet", Map.of(
-                    "shopMoney", Map.of("amount", 520, "currencyCode", "GBP"),
-                    "presentmentMoney", Map.of("amount", 520, "currencyCode", "GBP")
+            Map<String, Object> itemFixedDiscountCode = new HashMap<>();
+            JSONObject discountCodeJson = orderJson.getJSONObject("discountCode");
+            itemFixedDiscountCode.put("code", discountCodeJson.getString("code"));
+            itemFixedDiscountCode.put("amountSet", Map.of(
+                    "shopMoney", Map.of("amount", discountCodeJson.getBigDecimal("fixedAmount"), "currencyCode", "GBP"),
+                    "presentmentMoney", Map.of("amount", discountCodeJson.getBigDecimal("fixedAmount"), "currencyCode", "GBP")
             ));
-
-            List<Map<String, Object>> lineItemProperties2 = new ArrayList<>();
-            lineItemProperties2.add(Map.of("name", "SKU", "value", "RINE3129"));
-            lineItemProperties2.add(Map.of("name", "_Product Image", "value", "https://example.com/image2.jpg"));
-            lineItemProperties2.add(Map.of("name", "_Product URL", "value", "https://example.com/product-url-2"));
-            lineItemProperties2.add(Map.of("name", "_Delivery Date", "value", "2025-08-02"));
-            lineItemProperties2.add(Map.of("name", "_delivery_param", "value",
-                    "{\"product_id\":\"1222\",\"sku\":\"RINE3129\",\"delivery_days\":\"10\",\"certificate_no\":\"\",\"options\":{\"stone_type\":\"DI\",\"shape\":\"OVL\",\"carat\":\"25\",\"clarity\":\"VS2\",\"color\":\"G\",\"certificate\":\"GIA\",\"metal\":\"GL_18K_Y\"}}"));
-            lineItemProperties2.add(Map.of("name", "_price_param", "value",
-                    "{\"option_value_ids\":\"173,196,31,82,95,60,117\",\"engraving_charges\":10,\"instock\":\"yes\",\"tag_no\":\"T1234\",\"metal_weight\":\"1.2\",\"category_id\":\"2\",\"quantity\":1,\"product_id\":\"1222\",\"certificate_no\":\"G123456\",\"carat_weight\":0.25,\"metal_price\":100,\"stone_price\":200,\"markup\":\"30\",\"discount\":\"15\",\"model\":\"RINE3129\",\"option\":{\"11705\":\"286564\",\"11706\":\"72881\"}}"));
-            lineItemProperties2.add(Map.of("name", "_SKU Full", "value", "RINE3129_Y"));
-            lineItemProperties2.add(Map.of("name", "Metal", "value", "18K Yellow Gold"));
-            lineItemProperties2.add(Map.of("name", "Ring Size", "value", "L"));
-            lineItemProperties2.add(Map.of("name", "Stone Type", "value", "Naturally Mined Diamond"));
-            lineItemProperties2.add(Map.of("name", "Shape", "value", "Oval"));
-            lineItemProperties2.add(Map.of("name", "Carat", "value", "0.25"));
-            lineItemProperties2.add(Map.of("name", "Clarity", "value", "VS2"));
-            lineItemProperties2.add(Map.of("name", "Colour", "value", "G"));
-            lineItemProperties2.add(Map.of("name", "Cut", "value", "Excellent"));
-            lineItemProperties2.add(Map.of("name", "Certificate", "value", "GIA"));
-            lineItemProperties2.add(Map.of("name", "_SKU Hash", "value", "4FG666666"));
-            lineItemProperties2.add(Map.of("name", "_category_name", "value", "wedding rings"));
-            lineItemProperties2.add(Map.of("name", "_style_name", "value", "vintage halo"));
-            lineItemProperties2.add(Map.of("name", "_Product Title", "value", "Oval 18k Yellow Gold Naturally Mined Diamond Halo Wedding Ring"));
-            lineItemProperties2.add(Map.of("name", "_unique_id", "value", "kLopbAMZxv"));
-            lineItem2.put("properties", lineItemProperties2);
-
-            orderInput.put("lineItems", List.of(lineItem,lineItem2));
-
-            Map<String, Object> itemPercentageDiscountCode = new HashMap<>();
-            itemPercentageDiscountCode.put("code", "ENG12");
-            itemPercentageDiscountCode.put("percentage", 12.0);
 
             Map<String, Object> discountCode = new HashMap<>();
-            discountCode.put("itemPercentageDiscountCode", itemPercentageDiscountCode);
+            discountCode.put("itemFixedDiscountCode", itemFixedDiscountCode);
 
             orderInput.put("discountCode", discountCode);
 
-            // Transaction (dummy)
             orderInput.put("transactions", List.of(Map.of(
                     "kind", "SALE",
                     "status", "SUCCESS",
                     "amountSet", Map.of(
-                            "shopMoney", Map.of("amount", 836.00, "currencyCode", "GBP"),
-                            "presentmentMoney", Map.of("amount", 836.00, "currencyCode", "GBP")
+                            "shopMoney", Map.of("amount", orderJson.getBigDecimal("transactions"), "currencyCode", "GBP"),
+                            "presentmentMoney", Map.of("amount", orderJson.getBigDecimal("transactions"), "currencyCode", "GBP")
                     )
             )));
 
-            // Customer (as per 2025-01): use OrderCreateCustomerInput--use customerId field
             orderInput.put("customer", Map.of(
                     "toAssociate", Map.of(
                             "id", customerId
@@ -3677,4 +3768,84 @@ public class ProductMigrationService {
         }
     }
 
+    private String getVarientIdByProductId(String productId) {
+        try {
+            if (productId == null || productId.isEmpty()) {
+                throw new IllegalArgumentException("Product ID cannot be null or empty");
+            }
+
+            if (!productId.startsWith("gid://shopify/Product/")) {
+                productId = "gid://shopify/Product/" + productId;
+            }
+            // Step 1: Fetch Base Variant ID
+            String query = """
+                        query GetBaseVariant($productId: ID!) {
+                            product(id: $productId) {
+                                variants(first: 1) {
+                                    edges {
+                                        node {
+                                            id
+                                            sku
+                                            price
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    """;
+
+            Map<String, Object> variable = new HashMap<>();
+            variable.put("productId", productId);
+
+            regulateApiRate();
+            remainingPoints.addAndGet(-API_COST_PER_CALL);
+            String response = sendGraphQLRequest(query, objectMapper.writeValueAsString(variable), false);
+            if (response == null) {
+                logger.error("Failed to fetch base variant for product ID: {}", productId);
+                throw new IllegalArgumentException("Failed to fetch base variant for product ID: " + productId);
+            }
+
+            JSONObject responseObj = new JSONObject(response);
+
+            // Extract base variant ID
+            JSONObject data = responseObj.optJSONObject("data");
+            if (data == null) {
+                logger.error("Invalid GraphQL response: 'data' is missing");
+                throw new IllegalArgumentException("Invalid GraphQL response: 'data' is missing");
+            }
+
+            JSONObject product = data.optJSONObject("product");
+            if (product == null) {
+                logger.warn("No product found for ID: {}", productId);
+                throw new IllegalArgumentException("No product found for ID: " + productId);
+            }
+
+            JSONObject variants = product.optJSONObject("variants");
+            if (variants == null) {
+                logger.warn("No variants found for product ID: {}", productId);
+                throw new IllegalArgumentException("No variants found for product ID: " + productId);
+            }
+
+            JSONArray edges = variants.optJSONArray("edges");
+            if (edges == null || edges.isEmpty()) {
+                logger.warn("No variant edges found for product ID: {}", productId);
+                throw new IllegalArgumentException("No variant edges found for product ID: " + productId);
+            }
+
+            // Extract base variant
+            JSONObject baseVariant = edges.getJSONObject(0).optJSONObject("node");
+            if (baseVariant == null) {
+                logger.warn("Base variant node is missing for product ID: {}", productId);
+                throw new IllegalArgumentException("Base variant node is missing for product ID: " + productId);
+            }
+
+            String variantId = baseVariant.optString("id", null);
+            if (variantId == null) {
+                throw new IllegalArgumentException("Failed to get base variant ID for product ID: " + productId);
+            }
+            return variantId;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get base variant ID for product ID: " + productId, e);
+        }
+    }
 }

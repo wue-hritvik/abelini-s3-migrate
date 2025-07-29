@@ -10,6 +10,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.Set;
 
 @RestController
@@ -131,15 +132,25 @@ public class ProductMigrateController {
                 .body(fullSummary);
     }
 
-    @PostMapping("/customer/add-dummy-addresses")
+    @PostMapping("/customer/add-real-addresses")
     public String triggerDummyAddressAddition() {
         migrationService.addDummyAddressesAsync();
         return "Address creation started in background.";
     }
 
-    @PostMapping("/customer/add-dummy-orders")
+    @GetMapping("/customer/add-real-addresses/print/summary")
+    public Map<String, Object> triggerDummyAddressAdditionSummary() {
+        return migrationService.getResultAddressCreate();
+    }
+
+    @PostMapping("/customer/add-real-orders")
     public String triggerDummyOrderAddition() {
         migrationService.addDummyOrderAsync();
         return "Order creation started in background.";
+    }
+
+    @GetMapping("/customer/add-real-orders/print/summary")
+    public Map<String, Object> triggerDummyOrderAdditionSummary() {
+        return migrationService.getResultOrderCreate();
     }
 }
