@@ -3632,35 +3632,26 @@ public class ProductMigrationService {
 //                    "country", "United Kingdom",
 //                    "zip", "W1A 1AA"
 //            );
-            orderInput.put("shippingAddress", orderJson.getJSONObject("shippingAddress"));
+            JSONObject shippingJson = orderJson.optJSONObject("shippingAddress");
+
+            if (shippingJson != null) {
+                Map<String, Object> shippingAddress = convertToShopifyShippingAddressMap(shippingJson);
+                orderInput.put("shippingAddress", shippingAddress);
+            }
 //            orderInput.put("billingAddress", address);
 
             JSONArray lineItemsArray = orderJson.optJSONArray("lineItems");
             List<Map<String, Object>> lineItems = new ArrayList<>();
+
             if (lineItemsArray != null) {
                 for (int i = 0; i < lineItemsArray.length(); i++) {
                     JSONObject line = lineItemsArray.getJSONObject(i);
-                    Map<String, Object> lineItem = new HashMap<>();
-
-                    lineItem.put("variantId", getVarientIdByProductId(line.getString("productId")));
-                    lineItem.put("sku", line.getString("sku"));
-                    lineItem.put("quantity", line.getInt("quantity"));
-                    lineItem.put("priceSet", Map.of(
-                            "shopMoney", Map.of("amount", line.getBigDecimal("priceSet"), "currencyCode", "GBP"),
-                            "presentmentMoney", Map.of("amount", line.getBigDecimal("priceSet"), "currencyCode", "GBP")
-                    ));
-
-                    JSONArray propsArray = line.optJSONArray("properties");
-                    if (propsArray != null) {
-                        List<Map<String, String>> props = new ArrayList<>();
-                        for (int j = 0; j < propsArray.length(); j++) {
-                            JSONObject prop = propsArray.getJSONObject(j);
-                            props.add(Map.of("name", prop.getString("name"), "value", prop.optString("value", "")));
-                        }
-                        lineItem.put("properties", props);
-                    }
-
-                    lineItems.add(lineItem);
+                    lineItems.add(buildLineItem(line));
+                }
+            } else {
+                JSONObject singleLineItem = orderJson.optJSONObject("lineItems");
+                if (singleLineItem != null) {
+                    lineItems.add(buildLineItem(singleLineItem));
                 }
             }
 
@@ -3766,6 +3757,65 @@ public class ProductMigrationService {
             logger.error("Exception while creating order for customer {}: {}", customerId, e.getMessage(), e);
             return false;
         }
+    }
+
+    private Map<String, Object> buildLineItem(JSONObject line) {
+        Map<String, Object> lineItem = new HashMap<>();
+
+        lineItem.put("variantId", getVarientIdByProductId(line.getString("productId")));
+        lineItem.put("sku", line.getString("sku"));
+        lineItem.put("quantity", line.getInt("quantity"));
+
+        BigDecimal price = line.getBigDecimal("priceSet");
+
+        lineItem.put("priceSet", Map.of(
+                "shopMoney", Map.of("amount", price, "currencyCode", "GBP"),
+                "presentmentMoney", Map.of("amount", price, "currencyCode", "GBP")
+        ));
+
+        JSONArray propsArray = line.optJSONArray("properties");
+        if (propsArray != null) {
+            List<Map<String, String>> props = new ArrayList<>();
+            for (int j = 0; j < propsArray.length(); j++) {
+                JSONObject prop = propsArray.getJSONObject(j);
+                props.add(Map.of(
+                        "name", prop.getString("name"),
+                        "value", prop.optString("value", "")
+                ));
+            }
+            lineItem.put("properties", props);
+        }
+
+        return lineItem;
+    }
+
+    public Map<String, Object> convertToShopifyShippingAddressMap(JSONObject json) {
+        Map<String, Object> result = new HashMap<>();
+
+        // List of valid MailingAddressInput fields as per Shopify GraphQL spec
+        List<String> allowedKeys = List.of(
+                "firstName",
+                "lastName",
+                "address1",
+                "address2",
+                "city",
+                "company",
+                "country",
+                "province",
+                "zip",
+                "phone"
+        );
+
+        for (String key : allowedKeys) {
+            if (json.has(key)) {
+                Object value = json.opt(key);
+                if (value != null && !(value instanceof JSONObject || value instanceof JSONArray)) {
+                    result.put(key, value);
+                }
+            }
+        }
+
+        return result;
     }
 
     private String getVarientIdByProductId(String productId) {
