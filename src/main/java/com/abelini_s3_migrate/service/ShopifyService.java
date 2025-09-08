@@ -648,8 +648,8 @@ public class ShopifyService {
                     String fileName = s3Entry.getKey();
                     String s3Url = s3Entry.getValue();
 
-                    if (!fileName.contains(sku)) {
-                        continue; // Skip unrelated files
+                    if (!fileName.toLowerCase().contains(sku.toLowerCase())) {
+                        continue; // skip unrelated files
                     }
 
                     if (shopifyFileNameToIdMap.containsKey(fileName)) {
