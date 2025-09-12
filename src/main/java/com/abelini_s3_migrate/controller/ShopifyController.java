@@ -128,8 +128,9 @@ public class ShopifyController {
 
     @PostMapping("/update/images/by/sku")
     public String updateImagesBySku(@RequestParam String csvPath,
-            @RequestBody List<String> skus) {
-        shopifyService.updateImagesBySku(skus, csvPath);
+            @RequestBody Set<String> skus) {
+        List<String> skuList = new ArrayList<>(skus);
+        shopifyService.updateImagesBySku(skuList, csvPath);
         return "update images by sku started";
     }
 

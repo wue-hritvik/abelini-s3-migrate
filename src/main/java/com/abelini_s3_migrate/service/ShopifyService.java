@@ -626,7 +626,7 @@ public class ShopifyService {
                     }
 
                     String cleanFileName = extractCleanFilename(fileUrl);
-                    if (!cleanFileName.isBlank() && fileId != null) {
+                    if (!cleanFileName.isBlank() && fileId != null && !shopifyFileNameToIdMap.containsKey(cleanFileName)) {
                         shopifyFileNameToIdMap.put(cleanFileName, fileId);
                     }
                 }
@@ -645,10 +645,10 @@ public class ShopifyService {
 
             if (!shopifyFileNameToIdMap.isEmpty()) {
                 for (Map.Entry<String, String> s3Entry : s3FileNameToUrlMap.entrySet()) {
-                    String fileName = s3Entry.getKey();
+                    String fileName = s3Entry.getKey().toLowerCase();
                     String s3Url = s3Entry.getValue();
 
-                    if (!fileName.toLowerCase().contains(sku.toLowerCase())) {
+                    if (!fileName.contains(sku.toLowerCase())) {
                         continue; // skip unrelated files
                     }
 
@@ -665,9 +665,9 @@ public class ShopifyService {
                 stats.getImagesToUpdate().set(updateMap.size());
                 stats.getImagesToCreate().set(createList.size());
 
-                if (!updateMap.isEmpty()) {
-                    updateImagesAsync(updateMap, stats);
-                }
+//                if (!updateMap.isEmpty()) {
+//                    updateImagesAsync(updateMap, stats);
+//                }
                 if (!createList.isEmpty()) {
                     createImagesAsync(createList, stats);
                 }
@@ -854,80 +854,80 @@ public class ShopifyService {
     }
 
     private void createImagesAsync(List<String> imageUrls, SkuStats stats) {
-        stats.getFailedCreateList().addAll(imageUrls);
-//        int MAX_CONCURRENT_BATCHES = 10;
-//        Semaphore semaphore = new Semaphore(MAX_CONCURRENT_BATCHES);
-//        ExecutorService executorService = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
-//
-//        int batchSize = 250;
-//        int total = imageUrls.size();
-//        logger.info("Total URLs count: {}", total);
-//        int totalBatches = (int) Math.ceil((double) total / batchSize);
-//        stats.getCreateTotalBatch().addAndGet(totalBatches);
-//
-//        List<Future<?>> futures = new ArrayList<>();
-//
-//        for (int i = 0; i < imageUrls.size(); i += batchSize) {
-//            final int batchNumber = (i / batchSize) + 1;
-//            final List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
-//            logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
-//            futures.add(executorService.submit(() -> {
-//                try {
-//                    semaphore.acquire();
-//                    productMigrationService.regulateApiRate();
-//                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
-//                    remainingPoints.addAndGet(-API_COST_PER_CALL);
-//                    int count = registerBatchInShopify(batch);
-//                    if (count == 0) {
-//                        stats.getCreateBatchFailed().incrementAndGet();
-//                        stats.getCreateFailedBatchList().add(String.valueOf(batchNumber));
-//                        stats.getFailedCreateList().addAll(batch);
-//                        stats.getCreateFailed().addAndGet(batch.size());
-//                    } else {
-//                        stats.getCreateBatchSuccess().incrementAndGet();
-//                        stats.getCreateSuccess().addAndGet(count);
-//                    }
-//
-//                    stats.getCreateProcessed().addAndGet(batch.size());
-//                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, stats.getCreateBatchProcessed().get() + 1, imageUrls.size());
-//                } catch (Exception e) {
-//                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
-//                    stats.getCreateBatchFailed().incrementAndGet();
-//                    stats.getCreateFailedBatchList().add(String.valueOf(batchNumber));
-//                    stats.getFailedCreateList().addAll(batch);
-//                    stats.getCreateFailed().addAndGet(batch.size());
-//                } finally {
-//                    semaphore.release();
-//                    stats.getCreateBatchProcessed().incrementAndGet();
-//                }
-//            }));
-//
-//        }
-//
-//        for (Future<?> future : futures) {
-//            try {
-//                future.get();
-//            } catch (InterruptedException | ExecutionException e) {
-//                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
-//            }
-//        }
-//
-//        executorService.shutdown();
-//        try {
-//            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
-//                logger.warn("Executor did not terminate in the specified time.");
-//                executorService.shutdownNow();
-//                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
-//                    logger.error("Executor did not terminate after forced shutdown.");
-//                }
-//            } else {
-//                logger.info("All batches completed successfully within 5 minutes.");
-//            }
-//        } catch (InterruptedException e) {
-//            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
-//            executorService.shutdownNow();
-//            Thread.currentThread().interrupt();
-//        }
+//        stats.getFailedCreateList().addAll(imageUrls);
+        int MAX_CONCURRENT_BATCHES = 10;
+        Semaphore semaphore = new Semaphore(MAX_CONCURRENT_BATCHES);
+        ExecutorService executorService = Executors.newFixedThreadPool(MAX_CONCURRENT_BATCHES);
+
+        int batchSize = 250;
+        int total = imageUrls.size();
+        logger.info("Total URLs count: {}", total);
+        int totalBatches = (int) Math.ceil((double) total / batchSize);
+        stats.getCreateTotalBatch().addAndGet(totalBatches);
+
+        List<Future<?>> futures = new ArrayList<>();
+
+        for (int i = 0; i < imageUrls.size(); i += batchSize) {
+            final int batchNumber = (i / batchSize) + 1;
+            final List<String> batch = imageUrls.subList(i, Math.min(i + batchSize, imageUrls.size()));
+            logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
+            futures.add(executorService.submit(() -> {
+                try {
+                    semaphore.acquire();
+                    productMigrationService.regulateApiRate();
+                    logger.info("Starting batch {} of {} with {} images...", batchNumber, totalBatches, batch.size());
+                    remainingPoints.addAndGet(-API_COST_PER_CALL);
+                    int count = registerBatchInShopify(batch);
+                    if (count == 0) {
+                        stats.getCreateBatchFailed().incrementAndGet();
+                        stats.getCreateFailedBatchList().add(String.valueOf(batchNumber));
+                        stats.getFailedCreateList().addAll(batch);
+                        stats.getCreateFailed().addAndGet(batch.size());
+                    } else {
+                        stats.getCreateBatchSuccess().incrementAndGet();
+                        stats.getCreateSuccess().addAndGet(count);
+                    }
+
+                    stats.getCreateProcessed().addAndGet(batch.size());
+                    logger.info("Batch {} completed. Total processed so far: {}/{}", batchNumber, stats.getCreateBatchProcessed().get() + 1, imageUrls.size());
+                } catch (Exception e) {
+                    logger.error("Error uploading batch {}: {}", batchNumber, e.getMessage(), e);
+                    stats.getCreateBatchFailed().incrementAndGet();
+                    stats.getCreateFailedBatchList().add(String.valueOf(batchNumber));
+                    stats.getFailedCreateList().addAll(batch);
+                    stats.getCreateFailed().addAndGet(batch.size());
+                } finally {
+                    semaphore.release();
+                    stats.getCreateBatchProcessed().incrementAndGet();
+                }
+            }));
+
+        }
+
+        for (Future<?> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException | ExecutionException e) {
+                logger.error("Batch execution interrupted: {}", e.getMessage(), e);
+            }
+        }
+
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(5, TimeUnit.MINUTES)) {
+                logger.warn("Executor did not terminate in the specified time.");
+                executorService.shutdownNow();
+                if (!executorService.awaitTermination(1, TimeUnit.MINUTES)) {
+                    logger.error("Executor did not terminate after forced shutdown.");
+                }
+            } else {
+                logger.info("All batches completed successfully within 5 minutes.");
+            }
+        } catch (InterruptedException e) {
+            logger.error("Shutdown interrupted: {}", e.getMessage(), e);
+            executorService.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 
     String buildShopifyFileQuery(String sku, String cursor) {
@@ -965,7 +965,7 @@ public class ShopifyService {
                     }
                   }
                 }
-                """.formatted(sku, afterClause);
+                """.formatted(sku.toLowerCase(), afterClause);
     }
 
     public String extractCleanFilename(String url) {
@@ -979,7 +979,7 @@ public class ShopifyService {
         int productIdx = cleanUrl.indexOf("/product");
         if (productIdx == -1) return "";
 
-        return cleanUrl.substring(productIdx + 1); // remove leading '/'
+        return cleanUrl.substring(productIdx + 1).toLowerCase(); // remove leading '/'
     }
 
     private JSONObject executeGraphQLQuery(String query) {
