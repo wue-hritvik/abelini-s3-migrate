@@ -652,6 +652,12 @@ public class ShopifyService {
                         continue; // skip unrelated files
                     }
 
+                    //todo comment it again
+                    // ✅ NEW CHECK: only allow _0001.jpg / _0001.avif
+                    if (!isEligibleImage(fileName)) {
+                        continue;
+                    }
+
                     if (shopifyFileNameToIdMap.containsKey(fileName)) {
                         // File exists – schedule for update
                         String shopifyId = shopifyFileNameToIdMap.get(fileName);
@@ -665,9 +671,10 @@ public class ShopifyService {
                 stats.getImagesToUpdate().set(updateMap.size());
                 stats.getImagesToCreate().set(createList.size());
 
-//                if (!updateMap.isEmpty()) {
-//                    updateImagesAsync(updateMap, stats);
-//                }
+                //todo comment it again
+                if (!updateMap.isEmpty()) {
+                    updateImagesAsync(updateMap, stats);
+                }
                 if (!createList.isEmpty()) {
                     createImagesAsync(createList, stats);
                 }
@@ -682,6 +689,10 @@ public class ShopifyService {
         } finally {
             skusProcessed.incrementAndGet();
         }
+    }
+
+    private boolean isEligibleImage(String lower) {
+        return lower.endsWith("_0001.jpg") || lower.endsWith("_0001.avif");
     }
 
     private void updateImagesAsync(Map<String, String> updateMap, SkuStats stats) {
