@@ -652,11 +652,11 @@ public class ShopifyService {
                         continue; // skip unrelated files
                     }
 
-                    //todo comment it again
-                    // ✅ NEW CHECK: only allow _0001.jpg / _0001.avif
-                    if (!isEligibleImage(fileName)) {
-                        continue;
-                    }
+//                    //todo comment it again
+//                    // ✅ NEW CHECK: only allow _0001.jpg / _0001.avif
+//                    if (!isEligibleImage(fileName)) {
+//                        continue;
+//                    }
 
                     if (shopifyFileNameToIdMap.containsKey(fileName)) {
                         // File exists – schedule for update
@@ -671,10 +671,10 @@ public class ShopifyService {
                 stats.getImagesToUpdate().set(updateMap.size());
                 stats.getImagesToCreate().set(createList.size());
 
-                //todo comment it again
-                if (!updateMap.isEmpty()) {
-                    updateImagesAsync(updateMap, stats);
-                }
+//                //todo comment it again
+//                if (!updateMap.isEmpty()) {
+//                    updateImagesAsync(updateMap, stats);
+//                }
                 if (!createList.isEmpty()) {
                     createImagesAsync(createList, stats);
                 }
